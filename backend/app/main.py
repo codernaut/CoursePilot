@@ -1,7 +1,6 @@
 """FastAPI application factory."""
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import health
 from app.core.config import Settings, get_settings
@@ -19,16 +18,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title="CoursePilot API",
         version="0.1.0",
-        openapi_url=f"{API_PREFIX}/openapi.json",
-        docs_url="/docs",
+        openapi_url=None if settings.is_production else f"{API_PREFIX}/openapi.json",
+        # API docs are not public: off in production (and login-gated from M1 on).
+        docs_url=None if settings.is_production else "/docs",
         redoc_url=None,
-    )
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
     )
     app.add_middleware(RequestIdMiddleware)
     register_error_handlers(app)
