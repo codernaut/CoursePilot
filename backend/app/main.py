@@ -1,12 +1,23 @@
 """FastAPI application factory."""
 
-from fastapi import FastAPI
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
-from app.api import health
+from fastapi import FastAPI
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+from app.api.deps import CurrentUser
+from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
-from app.core.middleware import RequestIdMiddleware
+from app.core.middleware import RequestIdMiddleware, SecurityHeadersMiddleware
+from app.db.session import Database
+from app.services.auth import LoginThrottle
+from app.web.common import STATIC_DIR, make_templates
+from app.web.routes import admin_pages, auth_pages, structure_pages
 
 API_PREFIX = "/api/v1"
 
@@ -14,19 +25,49 @@ API_PREFIX = "/api/v1"
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level, json=settings.app_env != "development")
+    database = Database(settings.database_url)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        yield
+        await database.dispose()
 
     app = FastAPI(
         title="CoursePilot API",
         version="0.1.0",
-        openapi_url=None if settings.is_production else f"{API_PREFIX}/openapi.json",
-        # API docs are not public: off in production (and login-gated from M1 on).
-        docs_url=None if settings.is_production else "/docs",
+        # The built-in docs routes are public, so they are replaced by login-gated ones below.
+        openapi_url=None,
+        docs_url=None,
         redoc_url=None,
+        lifespan=lifespan,
     )
+    app.state.settings = settings
+    app.state.database = database
+    app.state.login_throttle = LoginThrottle(settings.login_rate_limit_per_min)
+    app.state.templates = make_templates()
+
+    app.add_middleware(SecurityHeadersMiddleware, hsts=settings.is_production)
     app.add_middleware(RequestIdMiddleware)
     register_error_handlers(app)
 
-    app.include_router(health.router, prefix=API_PREFIX)
+    app.include_router(api_router, prefix=API_PREFIX)
+    app.include_router(auth_pages.router)
+    app.include_router(admin_pages.router)
+    app.include_router(structure_pages.router)
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+    if not settings.is_production:
+
+        @app.get("/docs", include_in_schema=False)
+        async def docs(_: CurrentUser) -> HTMLResponse:
+            return get_swagger_ui_html(
+                openapi_url=f"{API_PREFIX}/openapi.json", title="CoursePilot API"
+            )
+
+        @app.get(f"{API_PREFIX}/openapi.json", include_in_schema=False)
+        async def openapi_json(_: CurrentUser) -> JSONResponse:
+            return JSONResponse(app.openapi())
+
     return app
 
 

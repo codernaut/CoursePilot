@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     secret_key: SecretStr = SecretStr("change-me")
     session_ttl_hours: int = Field(12, ge=1)
     login_rate_limit_per_min: int = Field(10, ge=1)
+    behind_proxy: bool = False
 
     # Data
     data_dir: str = "./data"

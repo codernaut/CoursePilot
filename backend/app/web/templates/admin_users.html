@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Users - CoursePilot{% endblock %}
+{% block content %}
+<h1>Users</h1>
+{% if error %}<p class="alert alert-error" role="alert">{{ error }}</p>{% endif %}
+{% if notice %}<p class="alert alert-info" role="status">{{ notice }}</p>{% endif %}
+{% if temporary %}
+<div class="alert alert-warning" role="alert">
+  <p>Temporary password for <strong>{{ temporary[0] }}</strong> (shown once, it cannot be retrieved later):</p>
+  <p><code class="temp-password">{{ temporary[1] }}</code></p>
+  <p>They must change it at their next login.</p>
+</div>
+{% endif %}
+
+<section class="card" aria-labelledby="create-heading">
+  <h2 id="create-heading">Create a user</h2>
+  <form method="post" action="/admin/users" class="grid-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div>
+      <label for="new-email">Email</label>
+      <input id="new-email" name="email" type="email" required maxlength="254" autocomplete="off">
+    </div>
+    <div>
+      <label for="new-name">Display name</label>
+      <input id="new-name" name="display_name" type="text" required maxlength="120" autocomplete="off">
+    </div>
+    <div>
+      <label for="new-role">Role</label>
+      <select id="new-role" name="role">
+        <option value="student">student</option>
+        <option value="faculty">faculty</option>
+        <option value="admin">admin</option>
+      </select>
+    </div>
+    <div>
+      <label for="new-password">Initial password (optional)</label>
+      <input id="new-password" name="password" type="text" minlength="10" autocomplete="off" aria-describedby="new-password-hint">
+      <p id="new-password-hint" class="muted">Leave blank to generate one. At least 10 characters.</p>
+    </div>
+    <div class="form-actions"><button type="submit" class="button">Create user</button></div>
+  </form>
+</section>
+
+<section aria-labelledby="list-heading">
+  <h2 id="list-heading">All users</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th scope="col">Name</th><th scope="col">Email</th><th scope="col">Role</th><th scope="col">Status</th><th scope="col">Actions</th></tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <th scope="row">{{ u.display_name }}</th>
+          <td>{{ u.email }}</td>
+          <td>
+            <form method="post" action="/admin/users/{{ u.id }}/role" class="inline-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <label class="visually-hidden" for="role-{{ u.id }}">Role for {{ u.email }}</label>
+              <select id="role-{{ u.id }}" name="role">
+                {% for r in roles %}<option value="{{ r.value }}"{% if r == u.role %} selected{% endif %}>{{ r.value }}</option>{% endfor %}
+              </select>
+              <button type="submit" class="button button-small">Set</button>
+            </form>
+          </td>
+          <td>{% if u.is_active %}Active{% else %}<span class="badge badge-off">Inactive</span>{% endif %}{% if u.must_change_password %} <span class="badge">must change password</span>{% endif %}</td>
+          <td class="actions">
+            <form method="post" action="/admin/users/{{ u.id }}/active" class="inline-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              {% if u.is_active %}
+              <input type="hidden" name="active" value="0">
+              <button type="submit" class="button button-small button-secondary">Deactivate<span class="visually-hidden"> {{ u.email }}</span></button>
+              {% else %}
+              <input type="hidden" name="active" value="1">
+              <button type="submit" class="button button-small button-secondary">Reactivate<span class="visually-hidden"> {{ u.email }}</span></button>
+              {% endif %}
+            </form>
+            <form method="post" action="/admin/users/{{ u.id }}/reset-password" class="inline-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="button button-small button-secondary">Reset password<span class="visually-hidden"> for {{ u.email }}</span></button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

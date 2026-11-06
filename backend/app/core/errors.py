@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.logging import get_logger
@@ -39,6 +39,26 @@ def error_response(
     )
 
 
+def unauthorized(message: str = "Authentication required.") -> AppError:
+    return AppError("unauthorized", message, status_code=401)
+
+
+def forbidden(message: str = "You do not have permission to do this.") -> AppError:
+    return AppError("forbidden", message, status_code=403)
+
+
+def not_found(message: str = "Not found.") -> AppError:
+    return AppError("not_found", message, status_code=404)
+
+
+def conflict(message: str, details: dict[str, Any] | None = None) -> AppError:
+    return AppError("conflict", message, status_code=409, details=details)
+
+
+def validation_error(message: str, details: dict[str, Any] | None = None) -> AppError:
+    return AppError("validation_error", message, status_code=422, details=details)
+
+
 _HTTP_CODES = {
     400: "bad_request",
     401: "unauthorized",
@@ -51,9 +71,28 @@ _HTTP_CODES = {
 }
 
 
-async def _app_error_handler(_: Request, exc: Exception) -> JSONResponse:
+def _page_redirect(request: Request, exc: AppError) -> Response | None:
+    """Browsers asking for a page (not the JSON API) are sent to the right form instead."""
+    if request.url.path.startswith("/api/"):
+        return None
+    target = None
+    if exc.status_code == 401:
+        target = "/login"
+    elif exc.code == "password_change_required":
+        target = "/change-password"
+    if target is None:
+        return None
+    if request.headers.get("hx-request"):
+        return Response(status_code=200, headers={"HX-Redirect": target})
+    return RedirectResponse(target, status_code=303)
+
+
+async def _app_error_handler(request: Request, exc: Exception) -> Response:
     if not isinstance(exc, AppError):  # pragma: no cover - registration guarantees type
         raise exc
+    redirect = _page_redirect(request, exc)
+    if redirect is not None:
+        return redirect
     return error_response(exc.status_code, exc.code, exc.message, exc.details)
 
 

@@ -2,7 +2,7 @@
 
 A RAG study assistant for a university programme's teaching material. Faculty upload slides, PDFs and notes into a fixed **Year › Block › Module** structure; students chat with an assistant that answers **from the uploaded material first, with citations**, and falls back to the web (clearly labelled) only when the material is insufficient.
 
-> Status: early development (milestone M0 done, M1 next). See [CLAUDE.md](CLAUDE.md) for scope, architecture and the build plan.
+> Status: early development (milestones M0 and M1 done: accounts, login, user admin and the programme structure). See [CLAUDE.md](CLAUDE.md) for scope, architecture and the build plan.
 
 No Docker, no Node, no externally installed servers: SQLite (with sqlite-vec and FTS5) for data and search, a FastAPI app that serves the web UI and the JSON API, and a background worker. Everything installs with pip/uv.
 
@@ -22,8 +22,6 @@ start.bat
 
 `setup` installs [uv](https://docs.astral.sh/uv/) if needed, installs dependencies, asks for the first admin account, your AI provider (Anthropic Claude or Google Gemini), an embedding provider and optional Tavily key (any key may be skipped), writes `.env`, and prepares the database. `start` runs migrations, starts the web app and the worker, and opens your browser at http://localhost:8000. There is no self-registration: the admin creates faculty and student accounts.
 
-(The scripts land with milestone M1. Until then, see the manual commands below.)
-
 ## Manual commands
 
 If `uv` is not on PATH, use `python -m uv` instead.
@@ -31,7 +29,11 @@ If `uv` is not on PATH, use `python -m uv` instead.
 ```bash
 cd backend
 uv sync
-uv run uvicorn app.main:app --reload --port 8000   # http://localhost:8000/docs
+uv run python -m app.cli setup                       # what setup.* calls
+uv run python -m app.cli create-admin                # add an administrator (hidden password prompt)
+uv run alembic upgrade head                          # or: python -m app.cli migrate
+uv run uvicorn app.main:app --reload --port 8000     # http://localhost:8000 (API docs at /docs after login)
+uv run python -m app.worker                          # background worker
 ```
 
 ## Checks
@@ -44,7 +46,7 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy app tests && 
 ## Layout
 
 - `backend/` — FastAPI app (API + server-rendered web UI), processing worker, retrieval and agent (Python 3.12, uv)
-- `setup.*`, `start.*` — thin install/start scripts (from M1)
+- `setup.*`, `start.*` — thin install/start scripts
 - `docs/` — architecture notes and ADRs
 
 ## License

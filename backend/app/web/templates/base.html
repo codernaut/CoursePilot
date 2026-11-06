@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="htmx-config" content='{"allowEval": false, "includeIndicatorStyles": false}'>
+  {% if csrf_token %}<meta name="csrf-token" content="{{ csrf_token }}">{% endif %}
+  <title>{% block title %}CoursePilot{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/htmx.min.js" defer></script>
+</head>
+<body{% if user and csrf_token %} hx-headers='{{ {"X-CSRF-Token": csrf_token} | tojson }}'{% endif %}>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="/">CoursePilot</a>
+    {% if user %}
+    <nav aria-label="Main">
+      <ul class="nav">
+        <li><a href="/"{% if request.url.path == "/" %} aria-current="page"{% endif %}>Home</a></li>
+        <li><a href="/structure"{% if request.url.path == "/structure" %} aria-current="page"{% endif %}>Programme</a></li>
+        {% if user.role.value == "admin" %}
+        <li><a href="/admin/users"{% if request.url.path == "/admin/users" %} aria-current="page"{% endif %}>Users</a></li>
+        {% endif %}
+        <li><a href="/change-password">Change password</a></li>
+      </ul>
+    </nav>
+    <div class="account">
+      <span class="who">{{ user.display_name }} <span class="badge">{{ user.role.value }}</span></span>
+      <form method="post" action="/logout">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="link-button">Log out</button>
+      </form>
+    </div>
+    {% endif %}
+  </header>
+  <main id="main" class="container">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

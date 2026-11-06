@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Home - CoursePilot{% endblock %}
+{% block content %}
+<h1>Welcome, {{ user.display_name }}</h1>
+{% if password_changed %}<p class="alert alert-info" role="status">Your password was changed.</p>{% endif %}
+<p class="muted">Programme modules. Uploading material and chat arrive in later milestones.</p>
+{% for year in years %}
+<section class="tree-year" aria-labelledby="year-{{ year.id }}">
+  <h2 id="year-{{ year.id }}">{{ year.title }}</h2>
+  {% for block in year.blocks %}
+  <h3>{{ block.title }}</h3>
+  <ul class="modules">
+    {% for module in block.modules %}
+    <li>
+      <strong>{{ module.title }}</strong>
+      {% if module.description %}<span class="muted"> - {{ module.description }}</span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endfor %}
+</section>
+{% else %}
+<p>No programme structure yet. An administrator can run <code>python -m app.cli seed-structure</code>.</p>
+{% endfor %}
+{% endblock %}

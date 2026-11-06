@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Log in - CoursePilot{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Log in</h1>
+  {% if error %}<p class="alert alert-error" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="/login" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" autocomplete="username" required maxlength="254" value="{{ email or '' }}" autofocus>
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="1024">
+    <button type="submit" class="button">Log in</button>
+  </form>
+  <p class="muted">Accounts are created by an administrator. Ask your administrator if you need access.</p>
+</section>
+{% endblock %}

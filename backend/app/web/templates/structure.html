@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Programme - CoursePilot{% endblock %}
+{% block content %}
+{% set is_admin = user.role.value == "admin" %}
+{% set can_edit_modules = user.role.value in ("admin", "faculty") %}
+<h1>Programme structure</h1>
+{% if saved %}<p class="alert alert-info" role="status">Saved.</p>{% endif %}
+{% if error %}<p class="alert alert-error" role="alert">{{ error }}</p>{% endif %}
+<p class="muted">
+  {% if is_admin %}Administrators can rename years, blocks and modules.{% elif can_edit_modules %}Faculty can rename modules and edit their descriptions.{% else %}The programme is organised into years, blocks and modules.{% endif %}
+</p>
+{% for year in years %}
+<section class="tree-year" id="year-{{ year.id }}" aria-labelledby="year-title-{{ year.id }}">
+  {% if is_admin %}
+  <form method="post" action="/structure/years/{{ year.id }}" class="inline-form heading-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="year-input-{{ year.id }}">Year {{ year.number }} title</label>
+    <input id="year-input-{{ year.id }}" name="title" value="{{ year.title }}" required maxlength="120">
+    <button type="submit" class="button button-small">Rename</button>
+  </form>
+  {% endif %}
+  <h2 id="year-title-{{ year.id }}">{{ year.title }}</h2>
+  {% for block in year.blocks %}
+  <div class="tree-block" id="block-{{ block.id }}">
+    {% if is_admin %}
+    <form method="post" action="/structure/blocks/{{ block.id }}" class="inline-form heading-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label for="block-input-{{ block.id }}">Block {{ block.number }} title</label>
+      <input id="block-input-{{ block.id }}" name="title" value="{{ block.title }}" required maxlength="120">
+      <button type="submit" class="button button-small">Rename</button>
+    </form>
+    {% endif %}
+    <h3>{{ block.title }}</h3>
+    <ul class="modules">
+      {% for module in block.modules %}
+      <li id="module-{{ module.id }}">
+        {% if can_edit_modules %}
+        <form method="post" action="/structure/modules/{{ module.id }}" class="module-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label for="module-title-{{ module.id }}">Module {{ module.number }} title</label>
+          <input id="module-title-{{ module.id }}" name="title" value="{{ module.title }}" required maxlength="120">
+          <label for="module-desc-{{ module.id }}">Description</label>
+          <textarea id="module-desc-{{ module.id }}" name="description" rows="2" maxlength="2000">{{ module.description }}</textarea>
+          <label class="checkbox"><input type="checkbox" name="web_search_enabled"{% if module.web_search_enabled %} checked{% endif %}> Allow web search fallback for this module</label>
+          <button type="submit" class="button button-small">Save module</button>
+        </form>
+        {% else %}
+        <strong>{{ module.title }}</strong>
+        {% if module.description %}<span class="muted"> - {{ module.description }}</span>{% endif %}
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endfor %}
+</section>
+{% else %}
+<p>No programme structure yet. Run <code>python -m app.cli seed-structure</code>.</p>
+{% endfor %}
+{% endblock %}
