@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     session_ttl_hours: int = Field(12, ge=1)
     login_rate_limit_per_min: int = Field(10, ge=1)
     behind_proxy: bool = False
+    # For a closed, trusted LAN without TLS only: lets production run on an http:// BASE_URL
+    # (non-Secure "session" cookie, no HSTS). Everything else stays on.
+    allow_insecure_http: bool = False
+    max_request_body_mb: int = Field(2, ge=1)
 
     # Data
     data_dir: str = "./data"
@@ -84,6 +88,10 @@ class Settings(BaseSettings):
     chat_daily_limit_per_user: int = Field(100, ge=1)
     agent_timeout_s: int = Field(60, ge=1)
 
+    # Retention
+    audit_retention_days: int = Field(365, ge=1)
+    login_failed_audit_retention_days: int = Field(30, ge=1)
+
     # Observability
     langsmith_api_key: SecretStr | None = None
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
@@ -127,8 +135,14 @@ class Settings(BaseSettings):
                     f"SECRET_KEY must be at least {MIN_PRODUCTION_SECRET_KEY_LENGTH} characters"
                     " in production"
                 )
-            if not self.base_url.startswith("https://"):
-                raise ValueError("BASE_URL must be https:// in production (Secure cookies)")
+            if self.allow_insecure_http:
+                if not self.base_url.startswith(("http://", "https://")):
+                    raise ValueError("BASE_URL must start with http:// or https://")
+            elif not self.base_url.startswith("https://"):
+                raise ValueError(
+                    "BASE_URL must be https:// in production (Secure cookies); "
+                    "set ALLOW_INSECURE_HTTP=true only for a closed trusted network"
+                )
         # Relative paths are anchored at the repo root so every process sees the same files.
         self.data_dir = _anchor(self.data_dir)
         self.checkpoint_db_path = _anchor(self.checkpoint_db_path)
@@ -141,6 +155,25 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
+
+    @property
+    def insecure_http_active(self) -> bool:
+        """Production deliberately served over plain http://. The flag does nothing for an
+        https:// BASE_URL, so a forgotten flag there cannot weaken cookies or drop HSTS."""
+        return (
+            self.is_production
+            and self.allow_insecure_http
+            and not self.base_url.startswith("https://")
+        )
+
+    @property
+    def secure_cookies(self) -> bool:
+        """``__Host-session`` + Secure cookie and HSTS: production unless explicitly insecure."""
+        return self.is_production and not self.insecure_http_active
+
+    @property
+    def max_request_body_bytes(self) -> int:
+        return self.max_request_body_mb * 1024 * 1024
 
 
 @lru_cache

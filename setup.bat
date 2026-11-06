@@ -12,9 +12,12 @@ if errorlevel 1 (
 
 python -m uv --version >nul 2>nul
 if errorlevel 1 (
-  echo Installing uv...
+  echo uv is not installed. Running: python -m pip install --user uv
   python -m pip install --user uv
-  if errorlevel 1 exit /b 1
+  if errorlevel 1 (
+    echo Could not install uv with pip. Install it from https://docs.astral.sh/uv/ and run this script again.
+    exit /b 1
+  )
 )
 
 python -m uv sync

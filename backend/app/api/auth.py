@@ -9,6 +9,7 @@ from app.api.deps import (
     SettingsDep,
     clear_session_cookie,
     client_ip,
+    get_password_throttle,
     get_session_token,
     get_throttle,
     set_session_cookie,
@@ -29,6 +30,7 @@ from app.services.security import make_login_token
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 ThrottleDep = Annotated[auth.LoginThrottle, Depends(get_throttle)]
+PasswordThrottleDep = Annotated[auth.LoginThrottle, Depends(get_password_throttle)]
 
 
 @router.get("/csrf", response_model=LoginTokenResponse)
@@ -79,9 +81,16 @@ async def me(ctx: CurrentUser) -> MeResponse:
 
 @router.post("/change-password", response_model=OkResponse)
 async def change_password(
-    body: ChangePasswordRequest, db: DbDep, ctx: CurrentUserAllowPending
+    body: ChangePasswordRequest,
+    db: DbDep,
+    ctx: CurrentUserAllowPending,
+    throttle: PasswordThrottleDep,
 ) -> OkResponse:
     await auth.change_password(
-        db, ctx, current_password=body.current_password, new_password=body.new_password
+        db,
+        ctx,
+        throttle,
+        current_password=body.current_password,
+        new_password=body.new_password,
     )
     return OkResponse()

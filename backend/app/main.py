@@ -8,12 +8,19 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from app import __version__
 from app.api.deps import CurrentUser
 from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
-from app.core.middleware import RequestIdMiddleware, SecurityHeadersMiddleware
+from app.core.middleware import (
+    BodySizeLimitMiddleware,
+    RequestIdMiddleware,
+    SecurityHeadersMiddleware,
+)
+from app.core.startup import warn_if_insecure_http
+from app.core.version import get_commit
 from app.db.session import Database
 from app.services.auth import LoginThrottle
 from app.web.common import STATIC_DIR, make_templates
@@ -25,6 +32,8 @@ API_PREFIX = "/api/v1"
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level, json=settings.app_env != "development")
+    warn_if_insecure_http(settings)
+    get_commit()  # resolve once at startup; failures yield "unknown"
     database = Database(settings.database_url)
 
     @asynccontextmanager
@@ -34,7 +43,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title="CoursePilot API",
-        version="0.1.0",
+        version=__version__,
         # The built-in docs routes are public, so they are replaced by login-gated ones below.
         openapi_url=None,
         docs_url=None,
@@ -44,9 +53,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.database = database
     app.state.login_throttle = LoginThrottle(settings.login_rate_limit_per_min)
+    app.state.password_throttle = LoginThrottle(settings.login_rate_limit_per_min)
     app.state.templates = make_templates()
 
-    app.add_middleware(SecurityHeadersMiddleware, hsts=settings.is_production)
+    # Added first = innermost, so its 413 responses still get the security headers and request id.
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_request_body_bytes)
+    app.add_middleware(SecurityHeadersMiddleware, hsts=settings.secure_cookies)
     app.add_middleware(RequestIdMiddleware)
     register_error_handlers(app)
 

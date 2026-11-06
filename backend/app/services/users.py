@@ -9,7 +9,8 @@ from app.core.errors import conflict, forbidden, not_found, validation_error
 from app.models import User
 from app.models.enums import Role
 from app.services import audit
-from app.services.auth import normalize_email, revoke_user_sessions, validate_password
+from app.services.auth import normalize_email, revoke_user_sessions
+from app.services.password_policy import validate_password
 from app.services.security import generate_temporary_password, hash_password
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -95,7 +96,7 @@ async def create_initial_admin(
     db: AsyncSession, *, email: str, display_name: str, password: str
 ) -> User:
     """Bootstrap path used by the CLI (no acting user yet). The admin chose the password."""
-    validate_password(password)
+    validate_password(password, email=email)
     user = await _insert_user(
         db,
         email=email,
@@ -133,7 +134,7 @@ async def create_user(
         generated = generate_temporary_password()
         password = generated
     else:
-        validate_password(password)
+        validate_password(password, email=email)
     user = await _insert_user(
         db,
         email=email,

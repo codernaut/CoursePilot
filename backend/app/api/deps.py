@@ -42,6 +42,11 @@ def get_throttle(request: Request) -> LoginThrottle:
     return throttle
 
 
+def get_password_throttle(request: Request) -> LoginThrottle:
+    throttle: LoginThrottle = request.app.state.password_throttle
+    return throttle
+
+
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 DatabaseDep = Annotated[Database, Depends(get_database)]
 
@@ -57,7 +62,7 @@ DbDep = Annotated[AsyncSession, Depends(get_db)]
 
 
 def cookie_name(settings: Settings) -> str:
-    return "__Host-session" if settings.is_production else "session"
+    return "__Host-session" if settings.secure_cookies else "session"
 
 
 def get_session_token(request: Request, settings: Settings) -> str | None:
@@ -72,7 +77,7 @@ def set_session_cookie(response: Response, settings: Settings, token: str) -> No
         path="/",
         httponly=True,
         samesite="lax",
-        secure=settings.is_production,
+        secure=settings.secure_cookies,
     )
 
 
@@ -82,7 +87,7 @@ def clear_session_cookie(response: Response, settings: Settings) -> None:
         path="/",
         httponly=True,
         samesite="lax",
-        secure=settings.is_production,
+        secure=settings.secure_cookies,
     )
 
 

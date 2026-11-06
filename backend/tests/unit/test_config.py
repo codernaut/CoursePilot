@@ -166,3 +166,77 @@ def test_env_example_loads_and_equals_defaults() -> None:
     """The documented example values must be valid and must not drift from the code defaults."""
     from_example = Settings(_env_file=ENV_EXAMPLE)
     assert from_example.model_dump() == Settings(_env_file=None).model_dump()
+
+
+def test_allow_insecure_http_defaults_to_false() -> None:
+    assert Settings(_env_file=None).allow_insecure_http is False
+
+
+def test_production_accepts_http_base_url_only_with_allow_insecure_http(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _production(
+        monkeypatch,
+        SECRET_KEY=GOOD_KEY,
+        BASE_URL="http://192.168.1.20:8000",
+        ALLOW_INSECURE_HTTP="true",
+    )
+    assert settings.is_production and settings.allow_insecure_http
+    assert settings.secure_cookies is False
+
+
+def test_production_still_rejects_http_base_url_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(ValidationError, match="ALLOW_INSECURE_HTTP"):
+        _production(monkeypatch, SECRET_KEY=GOOD_KEY, BASE_URL="http://192.168.1.20:8000")
+
+
+def test_allow_insecure_http_still_requires_a_url_scheme(monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(ValidationError, match="BASE_URL"):
+        _production(
+            monkeypatch, SECRET_KEY=GOOD_KEY, BASE_URL="192.168.1.20", ALLOW_INSECURE_HTTP="true"
+        )
+
+
+def test_allow_insecure_http_keeps_the_secret_key_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(ValidationError, match="SECRET_KEY"):
+        _production(
+            monkeypatch,
+            SECRET_KEY="short-key",
+            BASE_URL="http://192.168.1.20:8000",
+            ALLOW_INSECURE_HTTP="true",
+        )
+
+
+def test_https_production_is_secure_even_if_flag_is_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _production(monkeypatch, SECRET_KEY=GOOD_KEY, ALLOW_INSECURE_HTTP="true")
+    assert settings.allow_insecure_http is True
+    assert settings.secure_cookies is True
+    assert settings.insecure_http_active is False
+
+
+def test_http_production_with_flag_is_insecure(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _production(
+        monkeypatch,
+        SECRET_KEY=GOOD_KEY,
+        BASE_URL="http://192.168.1.20:8000",
+        ALLOW_INSECURE_HTTP="true",
+    )
+    assert settings.secure_cookies is False
+    assert settings.insecure_http_active is True
+
+
+def test_retention_and_body_limit_defaults() -> None:
+    settings = Settings(_env_file=None)
+    assert settings.audit_retention_days == 365
+    assert settings.login_failed_audit_retention_days == 30
+    assert settings.max_request_body_mb == 2
+    assert settings.max_request_body_bytes == 2 * 1024 * 1024
+
+
+@pytest.mark.parametrize(
+    "name", ["AUDIT_RETENTION_DAYS", "LOGIN_FAILED_AUDIT_RETENTION_DAYS", "MAX_REQUEST_BODY_MB"]
+)
+def test_new_limits_must_be_positive(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    monkeypatch.setenv(name, "0")
+    with pytest.raises(ValidationError, match=name.lower()):
+        Settings(_env_file=None)

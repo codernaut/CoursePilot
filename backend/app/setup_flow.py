@@ -13,8 +13,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import urlsplit
 
 from app.core.config import INSECURE_SECRET_KEYS, MIN_PRODUCTION_SECRET_KEY_LENGTH, Settings
+from app.core.errors import AppError
+from app.services.password_policy import validate_password
 
 MIN_PYTHON = (3, 12)
 
@@ -170,6 +173,61 @@ def _ask_port(p: Prompter, default: str) -> str:
         p.say("Enter a port number between 1 and 65535.")
 
 
+_TRUE_VALUES = {"true", "1", "yes", "on"}
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0", "::"}  # noqa: S104
+LAN_WARNING = (
+    "Warning: without HTTPS, passwords and session cookies cross the network in clear text. "
+    "Anyone on the same network can read them. Use this only on a closed network you trust."
+)
+
+
+def parse_lan_base_url(value: str) -> str | None:
+    """A normalised ``http(s)://host[:port]`` URL others can reach, or None if it is unusable."""
+    try:
+        parts = urlsplit(value.strip())
+        host = parts.hostname
+        parts.port  # noqa: B018 - raises ValueError for a malformed port
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https") or not host or host in _LOOPBACK_HOSTS:
+        return None
+    if parts.username is not None or parts.password is not None:
+        return None
+    if parts.path not in ("", "/") or parts.query or parts.fragment:
+        return None
+    return f"{parts.scheme}://{parts.netloc}"
+
+
+def _ask_yes_no(p: Prompter, prompt: str, default: bool) -> bool:
+    hint = "Y/n" if default else "y/N"
+    while True:
+        answer = p.ask(f"{prompt} [{hint}]:").strip().lower()
+        if not answer:
+            return default
+        if answer in ("y", "yes"):
+            return True
+        if answer in ("n", "no"):
+            return False
+        p.say("Please answer y or n.")
+
+
+def _ask_lan_base_url(p: Prompter, current: str, port: str) -> str:
+    suggestion = current if parse_lan_base_url(current) else ""
+    example = f"http://192.168.1.20:{port}"
+    for _ in range(5):
+        shown = suggestion or example
+        answer = p.ask(f"Address other computers will type in their browser [{shown}]:").strip()
+        candidate = parse_lan_base_url(answer or suggestion)
+        if candidate:
+            return candidate
+        p.say(
+            "Enter the machine's network address as http://HOST:PORT (not localhost), "
+            f"for example {example}."
+        )
+    p.say(f"Using {example}. Edit BASE_URL in .env if that is wrong.")
+    return example
+
+
 def _ask_key(p: Prompter, env: EnvFile, var: str, label: str) -> None:
     """Hidden prompt: Enter keeps the current value, '-' clears it, anything else replaces it."""
     current = env.get(var) or ""
@@ -210,10 +268,33 @@ def run_setup(
     port = _ask_port(p, old_port)
     env.set("APP_PORT", port)
     base_url = env.get("BASE_URL") or ""
-    if env.get("APP_ENV") != "production" and (
-        not base_url or base_url.startswith(("http://localhost", "http://127.0.0.1"))
-    ):
-        env.set("BASE_URL", f"http://localhost:{port}")
+
+    # Network exposure: loopback only (default) or the whole LAN without TLS.
+    was_lan = (env.get("ALLOW_INSECURE_HTTP") or "").lower() in _TRUE_VALUES
+    p.say(
+        "Current network setting: "
+        + ("other computers may connect without HTTPS." if was_lan else "this computer only.")
+    )
+    lan = _ask_yes_no(
+        p,
+        "Will other computers connect to this machine over the network without HTTPS?",
+        was_lan,
+    )
+    if lan:
+        p.say(LAN_WARNING)
+        env.set("APP_HOST", "0.0.0.0")  # noqa: S104 - the owner asked for LAN access
+        env.set("ALLOW_INSECURE_HTTP", "true")
+        env.set("BASE_URL", _ask_lan_base_url(p, base_url, port))
+    else:
+        # Only undo what the LAN answer set; a host the owner chose (e.g. 0.0.0.0 behind a TLS
+        # proxy on another machine) is left alone.
+        if was_lan or not env.get("APP_HOST"):
+            env.set("APP_HOST", "127.0.0.1")
+        env.set("ALLOW_INSECURE_HTTP", "false")
+        if env.get("APP_ENV") != "production" and (
+            was_lan or not base_url or base_url.startswith(("http://localhost", "http://127.0.0.1"))
+        ):
+            env.set("BASE_URL", f"http://localhost:{port}")
 
     # Session-signing secret: generated once, never replaced when it is already strong.
     current_secret = env.get("SECRET_KEY") or ""
@@ -299,14 +380,14 @@ def run_setup(
 
 def prompt_admin_details(p: Prompter, email: str | None = None) -> tuple[str, str, str] | None:
     """Ask for email, display name and a confirmed password (hidden). None if it gives up."""
-    from app.services.security import MIN_PASSWORD_LENGTH
-
     email = (email or p.ask("Admin email:")).strip()
     name = p.ask("Display name [Administrator]:").strip() or "Administrator"
     for _ in range(3):
         password = p.ask_secret("Password (min 10 characters, hidden):")
-        if len(password) < MIN_PASSWORD_LENGTH:
-            p.say(f"The password must be at least {MIN_PASSWORD_LENGTH} characters.")
+        try:
+            validate_password(password, email=email)
+        except AppError as exc:
+            p.say(exc.message)
             continue
         if password != p.ask_secret("Repeat password:"):
             p.say("The passwords do not match.")

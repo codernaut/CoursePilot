@@ -7,6 +7,8 @@ from fastapi import Request
 from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
 
+from app.core.version import version_label
+
 WEB_DIR = Path(__file__).resolve().parent
 STATIC_DIR = WEB_DIR / "static"
 
@@ -27,6 +29,9 @@ def render(
     data: dict[str, Any] = {
         "user": getattr(request.state, "user", None),
         "csrf_token": getattr(request.state, "csrf_token", None),
+        "version_label": version_label(),
+        "insecure_http": request.app.state.settings.allow_insecure_http
+        and not request.app.state.settings.secure_cookies,
     }
     data.update(context or {})
     templates: Jinja2Templates = request.app.state.templates

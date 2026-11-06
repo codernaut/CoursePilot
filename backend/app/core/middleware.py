@@ -1,12 +1,15 @@
 """Request-ID middleware: reuse an incoming X-Request-ID or generate one, bind it to logs."""
 
+import re
 import uuid
+from collections.abc import Sequence
 
 import structlog
+from starlette.exceptions import HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
-from starlette.types import ASGIApp
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.core.errors import error_response
 from app.core.logging import get_logger
@@ -65,3 +68,61 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         if not path.startswith("/static/"):
             response.headers.setdefault("Cache-Control", "no-store")
         return response
+
+
+# Paths that enforce their own, larger body limit. M2 adds the document upload route here
+# (it enforces UPLOAD_MAX_MB itself while streaming), e.g. r"^/api/v1/modules/[^/]+/documents$".
+BODY_LIMIT_EXEMPT_PATTERNS: tuple[re.Pattern[str], ...] = ()
+
+_TOO_LARGE_MESSAGE = "Request body is too large."
+
+
+class BodySizeLimitMiddleware:
+    """Reject request bodies over ``max_bytes`` with the standard 413 JSON error.
+
+    Checked up front from ``Content-Length`` and again while the body streams (chunked requests
+    and lying clients), so a large body is never buffered in full. Paths matching an exempt
+    pattern are skipped; they must enforce their own limit.
+    """
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        max_bytes: int,
+        exempt: Sequence[re.Pattern[str]] | None = None,
+    ) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+        self.exempt = BODY_LIMIT_EXEMPT_PATTERNS if exempt is None else tuple(exempt)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or any(p.match(scope["path"]) for p in self.exempt):
+            await self.app(scope, receive, send)
+            return
+        for name, value in scope["headers"]:
+            if name == b"content-length":
+                try:
+                    declared = int(value)
+                except ValueError:
+                    declared = 0
+                if declared > self.max_bytes:
+                    await error_response(413, "payload_too_large", _TOO_LARGE_MESSAGE)(
+                        scope, receive, send
+                    )
+                    return
+                break
+
+        received = 0
+
+        async def limited_receive() -> Message:
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    # Raised inside the endpoint, so the app's HTTP error handler renders it.
+                    raise HTTPException(413, _TOO_LARGE_MESSAGE)
+            return message
+
+        await self.app(scope, limited_receive, send)

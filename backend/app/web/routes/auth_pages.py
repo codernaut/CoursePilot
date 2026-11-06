@@ -12,6 +12,7 @@ from app.api.deps import (
     SettingsDep,
     clear_session_cookie,
     client_ip,
+    get_password_throttle,
     get_session_token,
     get_throttle,
     set_session_cookie,
@@ -25,6 +26,7 @@ from app.web.common import render
 router = APIRouter(include_in_schema=False)
 
 ThrottleDep = Annotated[auth.LoginThrottle, Depends(get_throttle)]
+PasswordThrottleDep = Annotated[auth.LoginThrottle, Depends(get_password_throttle)]
 
 
 @router.get("/login")
@@ -87,6 +89,7 @@ async def change_password_submit(
     request: Request,
     db: DbDep,
     ctx: CurrentUserAllowPending,
+    throttle: PasswordThrottleDep,
     current_password: Annotated[str, Form()] = "",
     new_password: Annotated[str, Form()] = "",
     confirm_password: Annotated[str, Form()] = "",
@@ -101,6 +104,7 @@ async def change_password_submit(
             await auth.change_password(
                 db,
                 ctx,
+                throttle,
                 current_password=current_password[:1024],
                 new_password=new_password[:1024],
             )

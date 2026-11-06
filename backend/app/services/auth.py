@@ -19,9 +19,8 @@ from app.core.errors import AppError, validation_error
 from app.db.base import utcnow
 from app.models import User, UserSession
 from app.services import audit
+from app.services.password_policy import validate_password
 from app.services.security import (
-    MAX_PASSWORD_LENGTH,
-    MIN_PASSWORD_LENGTH,
     hash_password,
     hash_token,
     new_token,
@@ -36,13 +35,6 @@ _SWEEP_THRESHOLD = 5000
 
 def normalize_email(email: str) -> str:
     return email.strip().lower()
-
-
-def validate_password(password: str) -> None:
-    if len(password) < MIN_PASSWORD_LENGTH:
-        raise validation_error(f"Password must be at least {MIN_PASSWORD_LENGTH} characters.")
-    if len(password) > MAX_PASSWORD_LENGTH:
-        raise validation_error("Password is too long.")
 
 
 class AuthProvider(Protocol):
@@ -98,6 +90,19 @@ class LoginThrottle:
         for key in keys:
             self._hits.setdefault(key, deque()).append(now)
         return True
+
+    # Generic per-key variant (used for change-password attempts): the caller checks first,
+    # records only failures, and clears the key after a success.
+    def is_blocked(self, key: str) -> bool:
+        return len(self._prune(key, self._clock())) >= self.limit
+
+    def record(self, key: str) -> None:
+        now = self._clock()
+        self._prune(key, now)
+        self._hits.setdefault(key, deque()).append(now)
+
+    def clear(self, key: str) -> None:
+        self._hits.pop(key, None)
 
 
 @dataclass(frozen=True)
@@ -204,12 +209,26 @@ async def revoke_user_sessions(
 
 
 async def change_password(
-    db: AsyncSession, ctx: SessionContext, *, current_password: str, new_password: str
+    db: AsyncSession,
+    ctx: SessionContext,
+    throttle: LoginThrottle,
+    *,
+    current_password: str,
+    new_password: str,
 ) -> None:
     user = ctx.user
+    key = f"pwchange:{user.id}"
+    if throttle.is_blocked(key):
+        raise AppError(
+            "rate_limited",
+            "Too many incorrect attempts. Please wait a minute and try again.",
+            status_code=429,
+        )
     if not verify_password(current_password, user.password_hash):
+        throttle.record(key)
         raise AppError("invalid_password", "Current password is incorrect.", status_code=400)
-    validate_password(new_password)
+    throttle.clear(key)
+    validate_password(new_password, email=user.email)
     if new_password == current_password:
         raise validation_error("The new password must differ from the current one.")
     user.password_hash = hash_password(new_password)

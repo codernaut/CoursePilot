@@ -66,9 +66,10 @@ class FakeDeps:
         )
 
 
-# Prompt order: port, provider, model, fast model, LLM key (secret), embedding provider, model,
-# dim, [embedding key (secret) when it is a different variable], Tavily key (secret).
-FRESH_DEFAULTS = ["", "", "", "", ANTHROPIC_KEY, "", "", "", GOOGLE_KEY, ""]
+# Prompt order: port, "other computers without HTTPS?", provider, model, fast model, LLM key
+# (secret), embedding provider, model, dim, [embedding key (secret) when it is a different
+# variable], Tavily key (secret).
+FRESH_DEFAULTS = ["", "", "", "", "", ANTHROPIC_KEY, "", "", "", GOOGLE_KEY, ""]
 ADMIN_ANSWERS = ["admin@example.edu", "", "very secret pw 1", "very secret pw 1"]
 
 
@@ -135,7 +136,7 @@ def test_rerun_masks_existing_values_and_enter_keeps_them(tmp_path: Path) -> Non
     _run(tmp_path, ["9001", *FRESH_DEFAULTS[1:], *ADMIN_ANSWERS])
     env_path = tmp_path / ".env"
     first_secret = EnvFile.load(env_path, EXAMPLE).get("SECRET_KEY")
-    answers = ["", "", "", "", "", "", "", "", "", ""]  # Enter everywhere
+    answers = [""] * 11  # Enter everywhere
     code, p, deps, _ = _run(tmp_path, answers, FakeDeps(admin_exists=True))
     assert code == 0
     env = EnvFile.load(env_path, EXAMPLE)
@@ -151,7 +152,7 @@ def test_rerun_masks_existing_values_and_enter_keeps_them(tmp_path: Path) -> Non
 
 def test_dash_clears_a_key(tmp_path: Path) -> None:
     _run(tmp_path, ["", *FRESH_DEFAULTS[1:], *ADMIN_ANSWERS])
-    answers = ["", "", "", "", "-", "", "", "", "", ""]
+    answers = ["", "", "", "", "", "-", "", "", "", "", ""]
     _run(tmp_path, answers, FakeDeps(admin_exists=True))
     env = EnvFile.load(tmp_path / ".env", EXAMPLE)
     assert env.get("ANTHROPIC_API_KEY") == ""
@@ -159,7 +160,7 @@ def test_dash_clears_a_key(tmp_path: Path) -> None:
 
 
 def test_keys_can_be_skipped(tmp_path: Path) -> None:
-    answers = ["", "", "", "", "", "", "", "", "", "", *ADMIN_ANSWERS]
+    answers = [""] * 11 + ADMIN_ANSWERS
     code, _, _, env_path = _run(tmp_path, answers)
     assert code == 0
     settings = Settings(_env_file=env_path)
@@ -170,7 +171,7 @@ def test_keys_can_be_skipped(tmp_path: Path) -> None:
 
 def test_switching_provider_prefills_matching_model_defaults(tmp_path: Path) -> None:
     # gemini chat + gemini embeddings: the Google key is only asked once.
-    answers = ["", "gemini", "", "", GOOGLE_KEY, "", "", "", "", *ADMIN_ANSWERS]
+    answers = ["", "", "gemini", "", "", GOOGLE_KEY, "", "", "", "", *ADMIN_ANSWERS]
     code, p, _, env_path = _run(tmp_path, answers)
     assert code == 0
     env = EnvFile.load(env_path, EXAMPLE)
@@ -182,17 +183,17 @@ def test_switching_provider_prefills_matching_model_defaults(tmp_path: Path) -> 
 
 
 def test_custom_model_is_kept_when_provider_unchanged(tmp_path: Path) -> None:
-    answers = ["", "", "my-custom-model", "", "", "", "", "", "", "", *ADMIN_ANSWERS]
+    answers = ["", "", "", "my-custom-model", "", "", "", "", "", "", "", *ADMIN_ANSWERS]
     _, _, _, env_path = _run(tmp_path, answers)
     assert EnvFile.load(env_path, EXAMPLE).get("LLM_MODEL") == "my-custom-model"
-    again = ["", "", "", "", "", "", "", "", "", ""]
+    again = [""] * 11
     _run(tmp_path, again, FakeDeps(admin_exists=True))
     assert EnvFile.load(env_path, EXAMPLE).get("LLM_MODEL") == "my-custom-model"
 
 
 def test_embedding_provider_choice_sets_model_and_dimension(tmp_path: Path) -> None:
     # voyage embeddings need their own key
-    answers = ["", "", "", "", "", "voyage", "", "", "voyage-key-123456", "", *ADMIN_ANSWERS]
+    answers = ["", "", "", "", "", "", "voyage", "", "", "voyage-key-123456", "", *ADMIN_ANSWERS]
     _, _, _, env_path = _run(tmp_path, answers)
     env = EnvFile.load(env_path, EXAMPLE)
     assert (env.get("EMBEDDING_MODEL"), env.get("EMBEDDING_DIM")) == ("voyage-3.5", "1024")
@@ -204,6 +205,8 @@ def test_invalid_answers_are_asked_again(tmp_path: Path) -> None:
         "99999",
         "abc",
         "8123",
+        "maybe",
+        "n",
         "nonsense",
         "anthropic",
         "",
@@ -219,6 +222,7 @@ def test_invalid_answers_are_asked_again(tmp_path: Path) -> None:
     code, p, _, env_path = _run(tmp_path, answers)
     assert code == 0
     assert EnvFile.load(env_path, EXAMPLE).get("APP_PORT") == "8123"
+    assert any("answer y or n" in s for s in p.said)
     assert any("between 1 and 65535" in s for s in p.said)
     assert any("Please choose" in s for s in p.said)
 
@@ -305,7 +309,7 @@ def test_real_deps_end_to_end_with_temp_database(tmp_path: Path) -> None:
     row = conn.execute("SELECT email, role, must_change_password FROM users").fetchone()
     assert row == ("admin@example.edu", "admin", 0)
     # Running it again changes nothing and asks no admin questions.
-    p2 = Scripted(["", "", "", "", "", "", "", "", "", ""])
+    p2 = Scripted([""] * 11)
     assert run_setup(p2, default_setup_deps(), env_path=env_path, example_path=example) == 0
     assert conn.execute("SELECT count(*) FROM users").fetchone() == (1,)
     assert conn.execute("SELECT count(*) FROM modules").fetchone() == (27,)

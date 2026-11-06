@@ -2,9 +2,11 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import text
 
+from app import __version__
 from app.api.deps import DatabaseDep
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.core.version import get_commit
 
 router = APIRouter(prefix="/health", tags=["health"])
 log = get_logger(__name__)
@@ -17,6 +19,11 @@ class HealthStatus(BaseModel):
 class ReadyStatus(BaseModel):
     status: str
     checks: dict[str, str]
+
+
+class VersionInfo(BaseModel):
+    version: str
+    commit: str
 
 
 @router.get("/live", response_model=HealthStatus)
@@ -41,3 +48,9 @@ async def ready(database: DatabaseDep) -> ReadyStatus:
             details={"checks": {"database": "error"}},
         ) from exc
     return ReadyStatus(status="ok", checks={"database": "ok", "sqlite_vec": "ok"})
+
+
+@router.get("/version", response_model=VersionInfo)
+async def version() -> VersionInfo:
+    """Public: the running version and git commit (no secrets, useful in bug reports)."""
+    return VersionInfo(version=__version__, commit=get_commit())

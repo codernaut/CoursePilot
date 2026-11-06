@@ -9,4 +9,10 @@ else
   PY=python
 fi
 
-exec "$PY" -m uv run python -m app.cli start
+if "$PY" -m uv --version >/dev/null 2>&1; then
+  exec "$PY" -m uv run python -m app.cli start
+fi
+# uv installed standalone (official installer or pipx) instead of as a Python module
+PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+export PATH
+exec uv run python -m app.cli start

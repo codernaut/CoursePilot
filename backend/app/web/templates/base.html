@@ -33,8 +33,12 @@
     </div>
     {% endif %}
   </header>
+  {% if insecure_http and user and user.role.value == "admin" %}
+  <div class="banner banner-warning" role="alert">Traffic to this server is not encrypted (ALLOW_INSECURE_HTTP=true).</div>
+  {% endif %}
   <main id="main" class="container">
     {% block content %}{% endblock %}
   </main>
+  <footer class="site-footer"><small>{{ version_label }}</small></footer>
 </body>
 </html>

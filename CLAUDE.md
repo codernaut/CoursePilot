@@ -44,6 +44,11 @@ Follow the build order in §14. Update this section as milestones land.
 
 - **M1 done (2026-11-06):** async SQLite engine (aiosqlite + sqlite-vec, WAL, per-connection pragmas, `BEGIN IMMEDIATE` for write sessions and a deferred `BEGIN` for read-only ones), all core tables as ORM models, Alembic migration `0001` (also creates `chunk_vectors` / `chunks_fts` and `app_meta`), CLI (`setup`, `create-admin`, `seed-structure`, `migrate`, `check`, `start`), `setup.*` / `start.*` scripts, minimal worker (purges expired sessions), server-side sessions with CSRF, login throttling and `must_change_password` gating, user admin, programme structure, Jinja2/HTMX pages (login, change password, home, users, structure), JSON API for the same, `/api/v1/health/ready`, login-gated `/docs`. Decisions: login throttling is an in-process sliding window (not shared between processes; fine for one uvicorn process); `GET /api/v1/auth/csrf` gives API clients the signed pre-login token; `BEHIND_PROXY` env var (only then the last `X-Forwarded-For` entry is the client IP); `/docs` has a relaxed CSP (Swagger UI loads from a CDN), dev only.
 
+- **Phase 2b done (2026-11-06, between M1 and M2):**
+  - `ALLOW_INSECURE_HTTP` for a closed trusted LAN without TLS (§13), asked by setup, with a startup warning and an admin banner.
+  - M1 security-review leftovers: password policy (`services/password_policy.py` plus a bundled common-password list), change-password throttle, audit retention purge in the worker, global request-body limit (`MAX_REQUEST_BODY_MB`), robust uv installation in `setup.sh`.
+  - Version info (`app.__version__`, git commit, footer, `GET /api/v1/health/version`), CI reports and a Windows test job, and the tag-driven release workflow with `scripts/build_release.py` (§16).
+
 ### Licence
 
 CoursePilot is licensed under **AGPL-3.0-only** (decided by the owner on 2026-11-06). Anyone who distributes the code, or runs a modified version as a network service, must release their source under the same licence. Every dependency we add must be AGPL-compatible (MIT, BSD, Apache-2.0, LGPL, GPL-3.0 and AGPL-3.0 are fine; GPL-2.0-only and proprietary licences are not).
@@ -96,7 +101,10 @@ CoursePilot/
 ├── .env.example                 # every env var, with safe placeholder values (the real `.env` lives here, at the repo root)
 ├── setup.bat  setup.sh          # first-time install + configuration (call `python -m app.cli setup`)
 ├── start.bat  start.sh          # migrate, start web app + worker, open the browser
-├── .github/workflows/ci.yml
+├── VERSION                      # only inside release zips: "<version> <full sha>"
+├── THIRD_PARTY_NOTICES.md
+├── scripts/build_release.py     # builds dist/coursepilot-<tag>.zip (+ .sha256); used by release.yml
+├── .github/workflows/           # ci.yml (every push/PR), release.yml (v* tags)
 ├── docs/
 │   ├── architecture.md          # components + flows; keep in sync with this file
 │   ├── deploy.md                # from M8
@@ -111,7 +119,8 @@ CoursePilot/
     │   ├── main.py              # FastAPI app factory, routers, middleware, static mount
     │   ├── cli.py               # python -m app.cli: setup, create-admin, seed-structure, migrate, check, start (reindex-all from M3)
     │   ├── worker.py            # entry point for the processing worker
-    │   ├── core/                # config (pydantic-settings), logging, security, errors, middleware
+    │   ├── core/                # config (pydantic-settings), logging, errors, middleware, startup checks, version
+    │   ├── resources/           # bundled data files, e.g. common_passwords.txt (not `data/`: that name is gitignored)
     │   ├── db/                  # engine (aiosqlite + sqlite-vec + WAL), session, base model
     │   ├── models/              # SQLAlchemy models
     │   ├── schemas/             # Pydantic request/response models
@@ -188,7 +197,7 @@ Browser ──POST /login (email, password, signed login-CSRF token, rate limite
   service: look up user (lowercased email), verify argon2 (against a dummy hash when the user does not exist,
            so timing does not reveal it), check is_active
          → create sessions row (sha256 of random token, csrf_token, expires_at = now + SESSION_TTL_HOURS)
-         → Set-Cookie: HttpOnly, SameSite=Lax, (+Secure in production) → redirect to /
+         → Set-Cookie: HttpOnly, SameSite=Lax, (+Secure in production unless ALLOW_INSECURE_HTTP) → redirect to /
   failure: one generic message and status for unknown user, wrong password and inactive user, audit_log entry
 Every other page and API route requires a valid session. State-changing requests also need the CSRF token
 (form field `csrf_token` or header `X-CSRF-Token`; HTMX sends it through `hx-headers` on <body>).
@@ -372,13 +381,18 @@ Everything runs locally without Docker: `pytest` with temporary SQLite files, pl
 
 ## 13. Security, privacy and cost
 
-- **Secrets**: only in `.env` / the deployment platform's secret store. Never commit `.env`. `.env.example` lists every variable with placeholders. `SECRET_KEY` is generated by setup; `Settings` refuses to start in production with a default, empty or short (< 32 chars) key or a non-`https` `BASE_URL`. It signs the pre-login CSRF token (it is not the session token). Settings use `SecretStr` for keys, and the setup script masks keys when showing current values. Setup writes `.env` owner-only (`0600`). Unhandled errors still return the standard JSON `500` with the security headers and request id.
+- **Secrets**: only in `.env` / the deployment platform's secret store. Never commit `.env`. `.env.example` lists every variable with placeholders. `SECRET_KEY` is generated by setup; `Settings` refuses to start in production with a default, empty or short (< 32 chars) key or a non-`https` `BASE_URL` (unless `ALLOW_INSECURE_HTTP=true`, see below; the key check always applies). It signs the pre-login CSRF token (it is not the session token). Settings use `SecretStr` for keys, and the setup script masks keys when showing current values. Setup writes `.env` owner-only (`0600`). Unhandled errors still return the standard JSON `500` with the security headers and request id.
 - **Authentication**:
   - Login required for every page and API route except `/login`, `/api/v1/health/*` and static files. No self-registration; accounts are created by an admin (the first admin by CLI).
   - Passwords: argon2 (`pwdlib`). Login is rate-limited (`LOGIN_RATE_LIMIT_PER_MIN`) and failures use one generic message.
+  - **Password policy** (`services/password_policy.py`, applied by create-admin, admin create-user and change-password; generated temporary passwords comply by construction): at least 10 characters, not all whitespace, not equal (case-insensitive) to the user's email or its local part, not in the bundled common-password list (`app/resources/common_passwords.txt`, curated for this project, see THIRD_PARTY_NOTICES.md). Errors are `422 validation_error` with a readable message.
+  - **Change-password throttle**: wrong current-password attempts are counted per user with the same sliding-window limiter as login (`LOGIN_RATE_LIMIT_PER_MIN`); over the limit returns `429 rate_limited` (even for the right password) until the window passes; a success clears the count.
   - Sessions are server-side: the cookie holds a random token, the DB holds only its sha256. Cookie is `HttpOnly`, `SameSite=Lax`, `Secure` in production. Sessions expire after `SESSION_TTL_HOURS`; logout deletes the row; deactivation and password reset delete all of a user's sessions.
   - CSRF token per session on every state-changing request (compared in constant time), plus an `Origin`/`Referer` check against `BASE_URL` on every non-GET request. A malformed `Origin`/`Referer` (bad port, userinfo) is rejected with `403`, never a `500`. The login form carries a short-lived HMAC-signed token (login CSRF). No CORS configuration. State changes are never GET.
   - A new session id is issued at every login. In production the cookie is named `__Host-session` (`Secure`, `Path=/`). Expired sessions are purged by the worker.
+  - **`ALLOW_INSECURE_HTTP`** (default `false`) is for a closed, trusted LAN without TLS. Off: production requires an `https://` `BASE_URL`, the `__Host-session` + `Secure` cookie and sends HSTS. On: production accepts an `http://` `BASE_URL`, the cookie is named `session` without `Secure` (still `HttpOnly`, `SameSite=Lax`) and HSTS is omitted. Everything else stays on (SECRET_KEY strength check, CSRF, Origin check, throttling, security headers, `/docs` disabled in production). It is never a substitute for TLS on an untrusted network: passwords and cookies cross it in clear text. When on in production, the app and the worker log a WARNING at startup, and every page shows admins the banner "Traffic to this server is not encrypted (ALLOW_INSECURE_HTTP=true)." (the banner follows the flag, whatever `APP_ENV`). With an `https://` `BASE_URL` in production the flag has no effect: cookies stay `__Host-session` + `Secure`, HSTS stays on, no warning or banner (`Settings.insecure_http_active` / `secure_cookies`). `setup` asks "Will other computers connect to this machine over the network without HTTPS? [y/N]" (default No: `APP_HOST=127.0.0.1`, flag false; Yes: warning, `APP_HOST=0.0.0.0`, flag true, and asks for the `BASE_URL`, e.g. `http://192.168.1.20:8000`, rejecting localhost and malformed URLs); re-running setup shows the current choice and keeps it on Enter. Setup does not change `APP_ENV`.
+  - **Request body limit**: `MAX_REQUEST_BODY_MB` (default 2) for every route except those in `BODY_LIMIT_EXEMPT_PATTERNS` (`core/middleware.py`; M2 adds the document upload route there and enforces `UPLOAD_MAX_MB` itself while streaming). Over the limit returns `413 payload_too_large` in the standard error shape, checked from `Content-Length` and again while a streamed body arrives.
+  - **Audit retention**: the worker deletes `audit_log` rows older than `AUDIT_RETENTION_DAYS` (default 365) and `login_failed` rows (which anyone can generate) older than `LOGIN_FAILED_AUDIT_RETENTION_DAYS` (default 30), hourly.
   - Login throttling counts per client IP and per email; `X-Forwarded-For` is trusted only when the deployment config says there is a proxy. Passwords and tokens are never logged; `create-admin` reads the password from a hidden prompt, never from argv.
 - **Uploads**:
   - Allow-list types (`pdf`, `pptx`, `docx`, `md`, `txt`, `html`) checked by magic bytes as well as extension.
@@ -462,8 +476,31 @@ uv run uvicorn app.main:app --reload --port 8000   # http://localhost:8000 (API 
 uv run python -m app.worker                 # processing worker
 uv run pytest                               # all tests
 uv run pytest tests/unit -k chunker         # a single area
-uv run ruff check . && uv run ruff format --check . && uv run mypy app tests
+uv run ruff check . && uv run ruff format --check . && uv run mypy app tests ../scripts/build_release.py
+uv run pytest --junitxml=reports/junit.xml --cov=app --cov-report=html:reports/htmlcov   # what CI uploads
+
+# build a release zip locally (tag must match backend/pyproject.toml version; see "Releases" below)
+python scripts/build_release.py --tag v0.1.0
 ```
+
+`setup.sh` finds `uv` on PATH or as `python3 -m uv`; otherwise it tries `python3 -m pip install --user uv`. On an "externally managed" Python (PEP 668) pip refuses, so the script prints the official installer command (`curl -LsSf https://astral.sh/uv/install.sh | sh`) and runs it only after you confirm; if you decline it tells you to install uv with `pipx install uv`. `setup.bat` uses `python -m pip install --user uv`.
+
+### Versioning
+
+SemVer. The single source of truth is `[project].version` in `backend/pyproject.toml`; `app.__version__` reads it (no network, no installed metadata needed). Stay on `0.x` during development and use `-rc.N` pre-releases (`v0.2.0-rc.1` pairs with version `0.2.0rc1`, or `0.2.0-rc.1`). Suggested mapping: `v0.1.0` after M1 (Phase 2b is part of it), `v0.2.0` after M2, `v0.3.0` after M3, `v0.4.0` after M4, `v0.5.0` after M5, `v0.6.0` after M6, `v0.7.0` after M7, `v1.0.0` after M8 (deploy). The running version and short git commit are shown as `vX.Y.Z · <sha>` in the page footer and by the public `GET /api/v1/health/version` (`{"version", "commit"}`). The commit is read from a `VERSION` file at the repo root when present (release zips contain `<version> <full sha>`), else from `git rev-parse --short HEAD`, else `unknown`.
+
+### Releases
+
+Only the owner cuts releases.
+
+1. Bump `[project].version` in `backend/pyproject.toml` in a normal commit (and update §2), push, and wait for green CI on `main`.
+2. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z` (or GitHub UI: Releases > Draft a new release > choose a new tag on `main`).
+3. `.github/workflows/release.yml` (triggered by `v*` tags; the only workflow with `contents: write`) then:
+   - verifies the tagged commit is an ancestor of `origin/main`;
+   - verifies the tag matches the version exactly (`v0.2.0` <-> `0.2.0`; `v0.2.0-rc.1` <-> `0.2.0rc1` or `0.2.0-rc.1`; anything else fails, including `v0.2.0rc1`, `-beta.N` and leading zeros, so `--prerelease` for `-rc` tags cannot be skipped by accident);
+   - runs ruff, mypy and pytest;
+   - runs `scripts/build_release.py`, which writes `coursepilot-<tag>.zip` (`backend/` without `.venv` and caches, `setup.*`, `start.*`, `README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `.env.example`, `CLAUDE.md`, `docs/`, and `VERSION`) and its `.sha256`. It never packages `.env`, `data/`, `*.db` or `*.sqlite`, and fails if any packaged file looks like it holds a secret (`sk-ant-...`, `sk-...`, `AIza...`, `tvly-...`, `-----BEGIN ...-----`; `.env.example` placeholders are allowed);
+   - creates the GitHub Release with `gh release create "$TAG" dist/* --generate-notes`, adding `--prerelease` for tags containing `-rc`.
 
 ---
 
@@ -480,6 +517,8 @@ SECRET_KEY=change-me                # generated by setup
 SESSION_TTL_HOURS=12
 LOGIN_RATE_LIMIT_PER_MIN=10
 BEHIND_PROXY=false                  # true only behind a trusted reverse proxy (X-Forwarded-For)
+ALLOW_INSECURE_HTTP=false           # true only for a closed trusted LAN without TLS (setup asks)
+MAX_REQUEST_BODY_MB=2               # all routes except the document upload
 
 DATA_DIR=./data
 DATABASE_URL=sqlite+aiosqlite:///./data/coursepilot.db
@@ -525,6 +564,9 @@ AGENT_TIMEOUT_S=60
 
 LANGSMITH_API_KEY=                  # optional tracing
 LOG_LEVEL=INFO
+
+AUDIT_RETENTION_DAYS=365            # the worker deletes older audit rows
+LOGIN_FAILED_AUDIT_RETENTION_DAYS=30
 ```
 
 The `fake` provider values are accepted by `Settings` (so tests can select them) but are not offered by setup or listed in `.env.example` comments for users to pick. Switching `LLM_PROVIDER` does not change `LLM_MODEL` automatically; setup prefills the matching default.

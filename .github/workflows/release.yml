@@ -1,0 +1,103 @@
+name: Release
+
+# Runs when a version tag is pushed (git tag vX.Y.Z && git push origin vX.Y.Z) or a release is
+# drafted in the GitHub UI with a new tag. Only the repository owner cuts releases.
+on:
+  push:
+    tags: ["v*"]
+
+# Least privilege: read-only by default; only the final publish job may write.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history: needed for the "tag is on main" check
+
+      - name: Tagged commit must be on main
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $GITHUB_REF_NAME ($GITHUB_SHA) is not an ancestor of origin/main. Releases are cut from main only."
+            exit 1
+          fi
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Tag must match the version in backend/pyproject.toml
+        # Rule: v0.2.0 <-> 0.2.0, v0.2.0-rc.1 <-> 0.2.0rc1 (or 0.2.0-rc.1). Same function as the build.
+        run: |
+          python3 - <<'PY'
+          import importlib.util, os, sys
+          spec = importlib.util.spec_from_file_location("build_release", "scripts/build_release.py")
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          tag = os.environ["GITHUB_REF_NAME"]
+          version = module.read_version(__import__("pathlib").Path("."))
+          if not module.tag_matches_version(tag, version):
+              print(f"::error::Tag {tag} does not match [project].version {version} in backend/pyproject.toml")
+              sys.exit(1)
+          print(f"Tag {tag} matches version {version}")
+          PY
+
+      - name: Install Python and dependencies
+        working-directory: backend
+        run: uv sync --locked
+
+      - name: Ruff lint
+        working-directory: backend
+        run: uv run ruff check .
+
+      - name: Ruff format
+        working-directory: backend
+        run: uv run ruff format --check .
+
+      - name: Mypy
+        working-directory: backend
+        run: uv run mypy app tests ../scripts/build_release.py
+
+      - name: Tests
+        working-directory: backend
+        run: uv run pytest
+
+      - name: Build release zip and checksum
+        run: python3 scripts/build_release.py --tag "$GITHUB_REF_NAME" --sha "$GITHUB_SHA" --out dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-dist
+          path: dist/
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub Release; nothing else in this job runs project code
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+          path: dist
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          flags=""
+          case "$TAG" in
+            *-rc*) flags="--prerelease" ;;
+          esac
+          gh release create "$TAG" dist/* --generate-notes --verify-tag $flags

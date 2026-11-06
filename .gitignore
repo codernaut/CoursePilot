@@ -18,7 +18,7 @@ build/
 
 
 # Local data
-data/
+/data/
 uploads/
 *.sqlite
 *.db
@@ -28,3 +28,6 @@ uploads/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Test reports
+backend/reports/
