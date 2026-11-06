@@ -23,8 +23,9 @@ from app.core.startup import warn_if_insecure_http
 from app.core.version import get_commit
 from app.db.session import Database
 from app.services.auth import LoginThrottle
+from app.storage import get_storage
 from app.web.common import STATIC_DIR, make_templates
-from app.web.routes import admin_pages, auth_pages, structure_pages
+from app.web.routes import admin_pages, auth_pages, materials_pages, structure_pages
 
 API_PREFIX = "/api/v1"
 
@@ -55,6 +56,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.login_throttle = LoginThrottle(settings.login_rate_limit_per_min)
     app.state.password_throttle = LoginThrottle(settings.login_rate_limit_per_min)
     app.state.templates = make_templates()
+    app.state.storage = get_storage(settings)
 
     # Added first = innermost, so its 413 responses still get the security headers and request id.
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_request_body_bytes)
@@ -66,6 +68,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth_pages.router)
     app.include_router(admin_pages.router)
     app.include_router(structure_pages.router)
+    app.include_router(materials_pages.router)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     if not settings.is_production:

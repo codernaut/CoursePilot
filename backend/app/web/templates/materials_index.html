@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Materials - CoursePilot{% endblock %}
+{% block content %}
+<h1>Materials</h1>
+<p class="muted">Choose a module to see its uploaded material.</p>
+{% include "_module_picker.html" %}
+{% for year in years %}
+<section class="tree-year" aria-labelledby="mat-year-{{ year.id }}">
+  <h2 id="mat-year-{{ year.id }}">{{ year.title }}</h2>
+  {% for block in year.blocks %}
+  <div class="tree-block">
+    <h3>{{ block.title }}</h3>
+    <ul class="modules">
+      {% for m in block.modules %}
+      <li><a href="/modules/{{ m.id }}/materials">{{ m.title }}</a></li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endfor %}
+</section>
+{% else %}
+<p>No programme structure yet. An administrator can run <code>python -m app.cli seed-structure</code>.</p>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,64 @@
+{% set pending = documents | selectattr("status.value", "in", ["uploaded", "processing"]) | list %}
+<div id="document-list"{% if pending %} hx-get="/modules/{{ module.id }}/materials/documents" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+  {% if documents %}
+  <div class="table-wrap">
+    <table>
+      <caption class="visually-hidden">Documents in {{ module.title }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">Title</th>
+          <th scope="col">Status</th>
+          <th scope="col">Size</th>
+          <th scope="col">Week</th>
+          <th scope="col">Uploaded</th>
+          <th scope="col">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for doc in documents %}
+        <tr data-doc-id="{{ doc.id }}" data-status="{{ doc.status.value }}" data-title="{{ doc.title }}">
+          <th scope="row">
+            {{ doc.title }}
+            <div class="muted file-meta">{{ doc.original_filename }}</div>
+          </th>
+          <td>
+            <span class="badge badge-status badge-{{ doc.status.value }}">
+              {%- if doc.status.value == "uploaded" %}Queued
+              {%- elif doc.status.value == "processing" %}Processing
+              {%- elif doc.status.value == "ready" %}Ready
+              {%- elif doc.status.value == "failed" %}Failed
+              {%- else %}{{ doc.status.value }}{% endif -%}
+            </span>
+            {% if doc.status.value == "failed" and doc.error %}
+            <div class="doc-error">{{ doc.error }}</div>
+            {% endif %}
+          </td>
+          <td>{{ doc.size_bytes | filesize }}</td>
+          <td>{{ doc.week or "" }}</td>
+          <td>{{ doc.created_at.strftime("%Y-%m-%d %H:%M") }} UTC</td>
+          <td>
+            <div class="actions">
+              <a class="button button-small button-secondary" href="/api/v1/documents/{{ doc.id }}/download"><span class="visually-hidden">Download </span>{{ "Open" if doc.mime_type == "application/pdf" else "Download" }}<span class="visually-hidden"> {{ doc.title }}</span></a>
+              {% if can_manage %}
+              {% if doc.status.value in ("ready", "failed") %}
+              <form method="post" action="/modules/{{ module.id }}/materials/{{ doc.id }}/reindex" class="inline-form" data-confirm="Re-index &quot;{{ doc.title }}&quot;? It will be processed again.">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button type="submit" class="button button-small button-secondary">Re-index<span class="visually-hidden"> {{ doc.title }}</span></button>
+              </form>
+              {% endif %}
+              <form method="post" action="/modules/{{ module.id }}/materials/{{ doc.id }}/delete" class="inline-form" data-confirm="Delete &quot;{{ doc.title }}&quot;? This cannot be undone.">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button type="submit" class="button button-small button-danger">Delete<span class="visually-hidden"> {{ doc.title }}</span></button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No material has been uploaded to this module yet.</p>
+  {% endif %}
+</div>

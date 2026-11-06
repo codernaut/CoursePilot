@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}{{ module.title }} materials - CoursePilot{% endblock %}
+{% block content %}
+<h1>Materials</h1>
+<p class="breadcrumb" aria-label="Module path">{{ module.block.year.title }} &rsaquo; {{ module.block.title }} &rsaquo; <strong>{{ module.title }}</strong></p>
+{% include "_module_picker.html" %}
+{% if error %}<p class="alert alert-error" role="alert">{{ error }}</p>{% endif %}
+{% if notice %}<p class="alert alert-info" role="status">{{ notice }}</p>{% endif %}
+
+{% if can_manage %}
+<section class="card" aria-labelledby="upload-heading">
+  <h2 id="upload-heading">Upload material</h2>
+  <p class="alert alert-warning" id="upload-notice"><strong>All users of this site can see uploaded material.</strong> Only upload files you have the right to share.</p>
+  <div id="drop-zone" class="dropzone" aria-describedby="upload-notice upload-hint"
+       data-upload-url="/api/v1/modules/{{ module.id }}/documents"
+       data-list-url="/modules/{{ module.id }}/materials/documents"
+       data-max-bytes="{{ max_bytes }}"
+       data-extensions="{{ extensions | join(',') }}">
+    <label for="file-input">Choose files to upload, or drag and drop them here</label>
+    <input id="file-input" type="file" multiple accept="{% for e in extensions %}.{{ e }}{% if not loop.last %},{% endif %}{% endfor %}">
+    <p id="upload-hint" class="muted">Allowed: {{ extensions | join(", ") }}. Up to {{ max_mb }} MB per file. Duplicates of a file already in this module are rejected.</p>
+  </div>
+  <ul id="upload-queue" class="upload-queue" aria-label="Uploads"></ul>
+</section>
+{% else %}
+<p class="muted">All users of this site can see uploaded material.
+  {% if user.role.value == "admin" %}Administrators manage users and the programme structure; only faculty upload material.{% else %}Only faculty upload material.{% endif %}</p>
+{% endif %}
+<p id="upload-status" class="visually-hidden" role="status" aria-live="polite"></p>
+
+<h2>Documents in {{ module.title }}</h2>
+{% include "_documents.html" %}
+<script src="/static/js/materials.js" defer></script>
+{% endblock %}

@@ -1,0 +1,15 @@
+<form method="get" action="/materials" class="inline-form picker-form">
+  <label for="module-picker">Module</label>
+  <select id="module-picker" name="module_id" required>
+    {% for year in years %}
+    {% for block in year.blocks %}
+    <optgroup label="{{ year.title }} &rsaquo; {{ block.title }}">
+      {% for m in block.modules %}
+      <option value="{{ m.id }}"{% if module is defined and module and module.id == m.id %} selected{% endif %}>{{ m.title }}</option>
+      {% endfor %}
+    </optgroup>
+    {% endfor %}
+    {% endfor %}
+  </select>
+  <button type="submit" class="button button-small">Open materials</button>
+</form>

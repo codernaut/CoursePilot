@@ -20,6 +20,7 @@ from app.services.security import (
     origin_allowed,
     verify_login_token,
 )
+from app.storage import Storage
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 CSRF_HEADER = "X-CSRF-Token"
@@ -49,6 +50,14 @@ def get_password_throttle(request: Request) -> LoginThrottle:
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 DatabaseDep = Annotated[Database, Depends(get_database)]
+
+
+def get_storage_dep(request: Request) -> Storage:
+    storage: Storage = request.app.state.storage
+    return storage
+
+
+StorageDep = Annotated[Storage, Depends(get_storage_dep)]
 
 
 async def get_db(request: Request, database: DatabaseDep) -> AsyncIterator[AsyncSession]:
@@ -111,8 +120,11 @@ async def submitted_csrf_token(request: Request) -> str | None:
     header = request.headers.get(CSRF_HEADER)
     if header:
         return header
+    # Only small urlencoded forms are parsed here. multipart/form-data bodies (file uploads) are
+    # streamed by their own handler and must send the token in the X-CSRF-Token header; parsing
+    # them here would buffer the whole upload before the size limit could apply.
     content_type = request.headers.get("content-type", "")
-    if content_type.startswith(("application/x-www-form-urlencoded", "multipart/form-data")):
+    if content_type.startswith("application/x-www-form-urlencoded"):
         form = await request.form()
         value = form.get(CSRF_FIELD)
         if isinstance(value, str):

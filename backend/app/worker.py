@@ -13,11 +13,13 @@ from app.core.logging import configure_logging, get_logger
 from app.core.startup import warn_if_insecure_http
 from app.db.session import Database
 from app.services import audit, auth
+from app.storage import Storage, get_storage
 
 log = get_logger(__name__)
 
 SESSION_PURGE_INTERVAL_S = 300.0
 AUDIT_PURGE_INTERVAL_S = 3600.0
+STALE_TEMP_MAX_AGE_S = 3600.0  # leftovers of interrupted uploads
 
 
 async def purge_once(database: Database) -> int:
@@ -34,6 +36,10 @@ async def purge_audit_once(database: Database, settings: Settings) -> int:
         )
 
 
+async def sweep_storage_once(storage: Storage) -> int:
+    return await storage.sweep_stale_temp(STALE_TEMP_MAX_AGE_S)
+
+
 async def run_worker(
     settings: Settings,
     stop: asyncio.Event,
@@ -44,6 +50,7 @@ async def run_worker(
     """Run until ``stop`` is set. Returns promptly when it is."""
     database = Database(settings.database_url)
     warn_if_insecure_http(settings)
+    storage = get_storage(settings)
     log.info("worker_started")
     last_audit_purge: float | None = None
     try:
@@ -54,6 +61,12 @@ async def run_worker(
                     log.info("expired_sessions_purged", count=purged)
             except Exception as exc:  # keep the worker alive; the next tick retries
                 log.warning("purge_failed", error=type(exc).__name__)
+            try:  # runs at startup (first iteration) and on every tick
+                swept = await sweep_storage_once(storage)
+                if swept:
+                    log.info("stale_upload_temp_files_removed", count=swept)
+            except Exception as exc:
+                log.warning("storage_sweep_failed", error=type(exc).__name__)
             now = time.monotonic()
             if last_audit_purge is None or now - last_audit_purge >= audit_interval_s:
                 try:

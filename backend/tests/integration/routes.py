@@ -25,6 +25,7 @@ class Route:
 
 def route_table(ids: dict[str, str]) -> list[Route]:
     u, y, b, m = ids["user"], ids["year"], ids["block"], ids["module"]
+    d = ids["document"]
     api = "/api/v1"
     anon_page = 303
     return [
@@ -46,12 +47,33 @@ def route_table(ids: dict[str, str]) -> list[Route]:
         Route("PATCH", f"{api}/blocks/{b}", {"title": "Basics"}, expected=(401, 403, 403, 200)),
         Route("GET", f"{api}/modules/{m}", expected=(401, 200, 200, 200)),
         Route("PATCH", f"{api}/modules/{m}", {"title": "Algebra"}, expected=(401, 403, 200, 200)),
+        Route("GET", f"{api}/modules/{m}/documents", expected=(401, 200, 200, 200)),
+        Route("GET", f"{api}/documents/{d}", expected=(401, 200, 200, 200)),
+        Route("PATCH", f"{api}/documents/{d}", {"title": "Renamed"}, expected=(401, 403, 200, 403)),
+        Route("POST", f"{api}/documents/{d}/reindex", expected=(401, 403, 202, 403)),
+        Route("GET", f"{api}/documents/{d}/download", expected=(401, 200, 200, 200)),
+        Route("DELETE", f"{api}/documents/{d}", expected=(401, 403, 202, 403)),
         Route("GET", f"{api}/auth/me", expected=(401, 200, 200, 200)),
         Route("GET", f"{api}/openapi.json", expected=(401, 200, 200, 200)),
         # HTML pages (anonymous users are redirected to /login)
         Route("GET", "/", expected=(anon_page, 200, 200, 200)),
         Route("GET", "/structure", expected=(anon_page, 200, 200, 200)),
         Route("GET", "/change-password", expected=(anon_page, 200, 200, 200)),
+        Route("GET", "/materials", expected=(anon_page, 200, 200, 200)),
+        Route("GET", f"/modules/{m}/materials", expected=(anon_page, 200, 200, 200)),
+        Route("GET", f"/modules/{m}/materials/documents", expected=(anon_page, 200, 200, 200)),
+        Route(
+            "POST",
+            f"/modules/{m}/materials/{d}/reindex",
+            form=True,
+            expected=(anon_page, 403, 303, 403),
+        ),
+        Route(
+            "POST",
+            f"/modules/{m}/materials/{d}/delete",
+            form=True,
+            expected=(anon_page, 403, 303, 403),
+        ),
         Route("GET", "/docs", expected=(anon_page, 200, 200, 200)),
         Route("GET", "/admin/users", expected=(anon_page, 403, 403, 200)),
         Route(

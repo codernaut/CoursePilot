@@ -31,8 +31,16 @@ state-changing requests: CSRF token must match the session
 ## Upload and processing
 
 ```
-faculty → POST /api/v1/modules/{id}/documents → validate → Storage.put(random key) → documents(uploaded)
-        → jobs(ingest_document) → 202
+faculty → POST /api/v1/modules/{id}/documents (multipart, one or more files)
+        → per file, while streaming: sanitise name, extension allow-list, magic bytes / UTF-8 check,
+          sha256, size cap (UPLOAD_MAX_MB) → Storage (temp file, atomic rename; random key)
+        → PPTX/DOCX: zip structure + decompressed-size cap → per-module sha256 dedupe (409)
+        → one transaction: documents(uploaded) + jobs(ingest_document, ids only) + audit_log → 202
+        (any failure after the object was stored deletes the object again)
+delete  → documents.status=deleting (hidden) + jobs(delete_document); reindex → jobs(reindex_document)
+download → GET /api/v1/documents/{id}/download streams from Storage (inline for PDF, attachment otherwise,
+          nosniff, CSP sandbox; inline PDFs get CSP default-src 'none' instead because
+          Chromium's PDF viewer does not render sandboxed documents)
 worker  → claim (UPDATE … RETURNING) → parse → chunk → embed → one transaction:
           replace chunks + chunk_vectors + chunks_fts → documents.status=ready
           failure → backoff retry → failed + readable error

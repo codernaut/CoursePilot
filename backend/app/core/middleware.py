@@ -59,7 +59,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             log.exception("unhandled_error", exc_type=type(exc).__name__)
             response = error_response(500, "internal_error", "Internal server error")
         path = request.url.path
-        response.headers["Content-Security-Policy"] = DOCS_CSP if path == "/docs" else CSP
+        # A route may set its own stricter policy (document downloads use ``sandbox``).
+        if "Content-Security-Policy" not in response.headers:
+            response.headers["Content-Security-Policy"] = DOCS_CSP if path == "/docs" else CSP
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"
@@ -70,9 +72,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
-# Paths that enforce their own, larger body limit. M2 adds the document upload route here
-# (it enforces UPLOAD_MAX_MB itself while streaming), e.g. r"^/api/v1/modules/[^/]+/documents$".
-BODY_LIMIT_EXEMPT_PATTERNS: tuple[re.Pattern[str], ...] = ()
+# Paths that enforce their own, larger body limit: only the document upload route, which
+# enforces UPLOAD_MAX_MB itself while streaming (anchored: nothing else under /modules/ matches).
+BODY_LIMIT_EXEMPT_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^/api/v1/modules/[0-9a-f]{32}/documents$"),
+)
 
 _TOO_LARGE_MESSAGE = "Request body is too large."
 

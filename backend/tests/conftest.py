@@ -1,3 +1,4 @@
+import hashlib
 import shutil
 from collections.abc import AsyncIterator, Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -14,9 +15,10 @@ from pwdlib.hashers.argon2 import Argon2Hasher
 from app.core.config import Settings
 from app.db.migrate import upgrade_to_head
 from app.main import create_app
-from app.models import User
-from app.models.enums import Role
+from app.models import Document, User
+from app.models.enums import DocumentStatus, Role
 from app.services import structure
+from app.storage import new_key
 
 TEST_PASSWORD = "correct horse battery"
 TEST_SECRET = "test-secret-key-" + "x" * 32
@@ -153,3 +155,40 @@ async def make_actor(app: FastAPI) -> AsyncIterator[Callable[..., Awaitable[Acto
 
     yield factory
     await stack.aclose()
+
+
+async def insert_document(
+    app: FastAPI,
+    *,
+    module_id: str,
+    uploaded_by: str,
+    content: bytes = b"%PDF-1.4\n%test\n",
+    filename: str = "notes.pdf",
+    title: str = "Notes",
+    mime_type: str = "application/pdf",
+    status: DocumentStatus = DocumentStatus.READY,
+    write_object: bool = True,
+) -> Document:
+    """Insert a documents row (and, by default, its stored object) without going through upload."""
+    key = new_key()
+    if write_object:
+
+        async def _chunks() -> AsyncIterator[bytes]:
+            yield content
+
+        await app.state.storage.put(key, _chunks())
+    async with app.state.database.session() as db:
+        document = Document(
+            module_id=module_id,
+            uploaded_by=uploaded_by,
+            title=title,
+            original_filename=filename,
+            mime_type=mime_type,
+            size_bytes=len(content),
+            storage_key=key,
+            content_sha256=hashlib.sha256(content).hexdigest(),
+            status=status,
+        )
+        db.add(document)
+        await db.commit()
+        return document

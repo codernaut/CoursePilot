@@ -13,10 +13,22 @@ WEB_DIR = Path(__file__).resolve().parent
 STATIC_DIR = WEB_DIR / "static"
 
 
+def human_size(size: int) -> str:
+    """1536 -> '1.5 KB' (binary units)."""
+    value = float(size)
+    for unit in ("B", "KB", "MB"):
+        if value < 1024:
+            return f"{int(value)} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} GB"
+
+
 def make_templates() -> Jinja2Templates:
     # Jinja2Templates enables autoescape for .html templates. Never mark user, document or
     # model text as safe in a template.
-    return Jinja2Templates(directory=str(WEB_DIR / "templates"))
+    templates = Jinja2Templates(directory=str(WEB_DIR / "templates"))
+    templates.env.filters["filesize"] = human_size
+    return templates
 
 
 def render(

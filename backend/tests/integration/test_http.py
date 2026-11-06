@@ -16,7 +16,10 @@ ActorFactory = Callable[..., Awaitable[Actor]]
 async def test_health_ready_ok(client: AsyncClient) -> None:
     response = await client.get("/api/v1/health/ready")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "checks": {"database": "ok", "sqlite_vec": "ok"}}
+    assert response.json() == {
+        "status": "ok",
+        "checks": {"database": "ok", "sqlite_vec": "ok", "storage": "ok"},
+    }
 
 
 async def test_health_is_public(client: AsyncClient) -> None:
@@ -36,6 +39,22 @@ async def test_health_ready_fails_with_error_shape(
     body = response.json()["error"]
     assert body["code"] == "not_ready"
     assert "db down" not in response.text
+
+
+async def test_health_ready_fails_when_storage_is_unusable(
+    app: FastAPI, client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def broken() -> None:
+        raise OSError("disk gone: C:/secret/path")
+
+    monkeypatch.setattr(app.state.storage, "check", broken)
+    response = await client.get("/api/v1/health/ready")
+    assert response.status_code == 503
+    body = response.json()["error"]
+    assert body["code"] == "not_ready"
+    assert body["details"]["checks"]["storage"] == "error"
+    assert body["details"]["checks"]["database"] == "ok"
+    assert "secret" not in response.text
 
 
 @pytest.mark.parametrize("path", ["/login", "/api/v1/health/live", "/static/css/app.css", "/nope"])

@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from app.models import Block, Module, Year
 from app.models.enums import Role
-from tests.conftest import Actor, insert_user
+from tests.conftest import Actor, insert_document, insert_user
 from tests.integration.routes import Route, csrf_routes, route_table
 
 ActorFactory = Callable[..., Awaitable[Actor]]
@@ -22,11 +22,25 @@ async def ids(app: FastAPI, seeded: None) -> dict[str, str]:
         block = (await db.execute(select(Block))).scalars().first()
         module = (await db.execute(select(Module))).scalars().first()
     assert year and block and module
-    return {"user": target.id, "year": year.id, "block": block.id, "module": module.id}
+    uploader = await insert_user(app, email="uploader@example.edu", role=Role.FACULTY)
+    document = await insert_document(app, module_id=module.id, uploaded_by=uploader.id)
+    return {
+        "user": target.id,
+        "year": year.id,
+        "block": block.id,
+        "module": module.id,
+        "document": document.id,
+    }
 
 
 # The table has static ids; build it once with placeholders and resolve at run time.
-_PLACEHOLDER = {"user": "{user}", "year": "{year}", "block": "{block}", "module": "{module}"}
+_PLACEHOLDER = {
+    "user": "{user}",
+    "year": "{year}",
+    "block": "{block}",
+    "module": "{module}",
+    "document": "{document}",
+}
 TABLE = route_table(_PLACEHOLDER)
 
 
