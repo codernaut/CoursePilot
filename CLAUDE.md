@@ -35,7 +35,13 @@ CoursePilot is a web-hosted **RAG (retrieval-augmented generation) study assista
 
 ## 2. Current status
 
-**Greenfield.** Only this file exists. Follow the build order in §14. Update this section as milestones land, e.g. `M1 done (2026-11-10): backend skeleton, auth, DB migrations`.
+Follow the build order in §14. Update this section as milestones land.
+
+- **M0 done (2026-11-06):** README, AGPL-3.0 LICENSE, `.env.example`, `docker-compose.yml` (Postgres + pgvector, MinIO), backend skeleton (uv, ruff, mypy strict, pytest), settings, structured logging, request IDs, standard error shape, `GET /api/v1/health/live`, GitHub Actions CI. Not yet verified: `docker compose up` (Docker was not installed on the dev machine when M0 landed).
+
+### Licence
+
+CoursePilot is licensed under **AGPL-3.0-only** (decided by the owner on 2026-11-06). Anyone who distributes the code, or runs a modified version as a network service, must release their source under the same licence. Every dependency we add must be AGPL-compatible (MIT, BSD, Apache-2.0, LGPL, GPL-3.0 and AGPL-3.0 are fine; GPL-2.0-only and proprietary licences are not).
 
 ---
 
@@ -339,7 +345,7 @@ Errors use one JSON shape: `{"error": {"code": "string", "message": "string", "d
 Finish and commit each milestone in a working state, with tests, before starting the next one. Update §2 after each milestone.
 
 1. **M0: Repo foundations.**
-   - `README.md`, `LICENSE` (MIT unless the owner says otherwise), `.gitignore`, `.env.example`.
+   - `README.md`, `LICENSE` (AGPL-3.0-only, see §2), `.gitignore`, `.env.example`.
    - `docker-compose.yml` with Postgres + pgvector and MinIO.
    - `backend/` skeleton with uv, ruff, mypy and pytest set up.
    - `GET /health/live`.
@@ -389,7 +395,7 @@ uv run uvicorn app.main:app --reload --port 8000     # API on http://localhost:8
 uv run python -m app.worker                           # ingestion worker
 uv run pytest                                         # all tests
 uv run pytest tests/unit -k chunker                   # a single area
-uv run ruff check . && uv run ruff format --check . && uv run mypy app
+uv run ruff check . && uv run ruff format --check . && uv run mypy app tests
 
 # frontend
 cd frontend
