@@ -4,10 +4,13 @@ Actual file removal and re-processing happen in the worker (M3); here the API on
 intent (status + job row) so the request stays short.
 """
 
+from collections.abc import Sequence
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import conflict, forbidden, not_found, validation_error
+from app.db.chunk_store import count_chunks
 from app.jobs import enqueue
 from app.models import Document, User
 from app.models.enums import DocumentStatus, JobType, Role
@@ -32,6 +35,11 @@ async def list_documents(db: AsyncSession, module_id: str) -> list[Document]:
         .order_by(Document.created_at.desc(), Document.title)
     )
     return list(result.scalars().all())
+
+
+async def chunk_counts(db: AsyncSession, docs: Sequence[Document]) -> dict[str, int]:
+    """Indexed chunk count per document id (documents without chunks are absent)."""
+    return await count_chunks(db, [d.id for d in docs if d.status == DocumentStatus.READY])
 
 
 async def get_document(db: AsyncSession, document_id: str) -> Document:

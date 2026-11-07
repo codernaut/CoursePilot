@@ -42,6 +42,7 @@ async def _page(
         {
             "module": module,
             "documents": docs,
+            "chunk_counts": await documents.chunk_counts(db, docs),
             "years": years,
             "can_manage": user.role == Role.FACULTY,
             "max_mb": settings.upload_max_mb,
@@ -89,6 +90,7 @@ async def materials_list_fragment(
         {
             "module": module,
             "documents": docs,
+            "chunk_counts": await documents.chunk_counts(db, docs),
             "can_manage": request.state.user.role == Role.FACULTY,
         },
     )

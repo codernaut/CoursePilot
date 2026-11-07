@@ -20,6 +20,7 @@ class DocumentOut(BaseModel):
     status: DocumentStatus
     error: str | None
     page_count: int | None
+    chunk_count: int | None = None  # text chunks indexed (listing and detail only)
     week: str | None
     created_at: datetime
     updated_at: datetime

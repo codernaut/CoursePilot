@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from app.api.deps import CurrentUser, DbDep, SettingsDep, StorageDep, require_role
 from app.core.errors import AppError, not_found
 from app.models import Document
-from app.models.enums import Role
+from app.models.enums import DocumentStatus, Role
 from app.schemas.documents import (
     DocumentOut,
     DocumentPatch,
@@ -40,6 +40,13 @@ def content_disposition(disposition: str, filename: str) -> str:
     """RFC 6266 header: an ASCII fallback ``filename`` plus the UTF-8 ``filename*`` (RFC 5987)."""
     fallback = _ASCII_UNSAFE.sub("_", filename) or "download"
     return f"{disposition}; filename=\"{fallback}\"; filename*=UTF-8''{quote(filename, safe='')}"
+
+
+def _out(document: Document, counts: dict[str, int]) -> DocumentOut:
+    out = DocumentOut.model_validate(document)
+    if document.status == DocumentStatus.READY:
+        out.chunk_count = counts.get(document.id, 0)
+    return out
 
 
 def _upload_error(rejected: uploads.RejectedFile) -> UploadErrorOut:
@@ -101,12 +108,15 @@ async def upload_documents(
 
 @router.get("/modules/{module_id}/documents", response_model=list[DocumentOut])
 async def list_module_documents(module_id: str, db: DbDep, _: CurrentUser) -> list[DocumentOut]:
-    return [DocumentOut.model_validate(d) for d in await documents.list_documents(db, module_id)]
+    docs = await documents.list_documents(db, module_id)
+    counts = await documents.chunk_counts(db, docs)
+    return [_out(d, counts) for d in docs]
 
 
 @router.get("/documents/{document_id}", response_model=DocumentOut)
 async def get_document(document_id: str, db: DbDep, _: CurrentUser) -> DocumentOut:
-    return DocumentOut.model_validate(await documents.get_document(db, document_id))
+    document = await documents.get_document(db, document_id)
+    return _out(document, await documents.chunk_counts(db, [document]))
 
 
 @router.patch("/documents/{document_id}", response_model=DocumentOut)

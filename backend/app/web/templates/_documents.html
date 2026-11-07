@@ -31,6 +31,12 @@
             </span>
             {% if doc.status.value == "failed" and doc.error %}
             <div class="doc-error">{{ doc.error }}</div>
+            {% elif doc.status.value == "ready" %}
+            <div class="muted file-meta">
+              {%- set n = chunk_counts.get(doc.id, 0) -%}
+              {{ n }} passage{{ "" if n == 1 else "s" }}
+              {%- if doc.page_count %}, {{ doc.page_count }} {{ "slide" if doc.mime_type.endswith("presentation") else "page" }}{{ "" if doc.page_count == 1 else "s" }}{% endif -%}
+            </div>
             {% endif %}
           </td>
           <td>{{ doc.size_bytes | filesize }}</td>

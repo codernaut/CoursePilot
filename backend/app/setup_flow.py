@@ -350,11 +350,12 @@ def run_setup(
     if emb_key not in asked_keys:
         _ask_key(p, env, emb_key, f"{embedding.capitalize()} API key (optional)")
         asked_keys.add(emb_key)
+    p.say(
+        "Note: changing the embedding provider, model or dimension later (after material was "
+        "processed) requires 'python -m app.cli reindex-all'."
+    )
     if (embedding, env.get("EMBEDDING_MODEL"), env.get("EMBEDDING_DIM")) != old_embedding_cfg:
-        p.say(
-            "Note: changing the embedding settings after material was processed needs "
-            "'python -m app.cli reindex-all'."
-        )
+        p.say("Your embedding settings changed in this run, so re-index existing material.")
 
     # Web search
     _ask_key(p, env, "TAVILY_API_KEY", "Tavily web search API key (optional)")

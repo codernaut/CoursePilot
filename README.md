@@ -38,6 +38,7 @@ uv run python -m app.cli create-admin                # add an administrator (hid
 uv run alembic upgrade head                          # or: python -m app.cli migrate
 uv run uvicorn app.main:app --reload --port 8000     # http://localhost:8000 (API docs at /docs after login)
 uv run python -m app.worker                          # background worker
+uv run python -m app.cli reindex-all                  # after changing EMBEDDING_PROVIDER/MODEL/DIM (stop the worker first)
 ```
 
 ## Checks

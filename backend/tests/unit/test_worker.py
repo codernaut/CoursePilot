@@ -69,3 +69,27 @@ async def test_worker_survives_a_failing_purge(
     stop.set()
     await asyncio.wait_for(task, timeout=2)
     assert calls >= 2
+
+
+async def test_signal_handlers_set_the_stop_event() -> None:
+    import contextlib
+    import signal
+
+    loop = asyncio.get_running_loop()
+    stop = asyncio.Event()
+    previous = signal.getsignal(signal.SIGINT)
+    worker.install_signal_handlers(loop, stop)
+    try:
+        signal.raise_signal(signal.SIGINT)  # Ctrl+C: must not raise KeyboardInterrupt
+        await asyncio.wait_for(stop.wait(), 2)
+    finally:
+        with contextlib.suppress(NotImplementedError, RuntimeError, ValueError):
+            loop.remove_signal_handler(signal.SIGINT)
+        signal.signal(signal.SIGINT, previous)
+
+
+def test_worker_ids_are_unique_and_identify_the_process() -> None:
+    import os
+
+    a, b = worker.make_worker_id(), worker.make_worker_id()
+    assert a != b and f":{os.getpid()}:" in a

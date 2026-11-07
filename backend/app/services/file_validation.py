@@ -15,12 +15,12 @@ from dataclasses import dataclass
 from pathlib import PurePath
 from typing import IO
 
+from app.core.zip_guard import MAX_ZIP_ENTRIES, ZipGuardError, precheck_zip_directory
 from app.storage import Storage
 
 # Total declared decompressed size allowed for a PPTX/DOCX. zipfile never yields more than the
 # declared size per member, so the declaration is a hard upper bound for any reader.
 MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024
-MAX_ZIP_ENTRIES = 10_000
 MAX_FILENAME_LENGTH = 200
 _MAX_EXTENSION_LENGTH = 16
 _SPOOL_BYTES = 8 * 1024 * 1024
@@ -146,6 +146,12 @@ def check_zip(file: IO[bytes], file_type: FileType, *, max_uncompressed: int | N
     """Validate the zip structure of a PPTX/DOCX (blocking; run in a thread)."""
     limit = MAX_UNCOMPRESSED_BYTES if max_uncompressed is None else max_uncompressed
     label = file_type.extension.upper()
+    try:
+        # Cheap EOCD check first: zipfile would otherwise load a hostile central directory whole.
+        precheck_zip_directory(file)
+    except ZipGuardError as exc:
+        raise ContentError(f"The {label} {exc}.") from exc
+    file.seek(0)
     try:
         with zipfile.ZipFile(file) as archive:
             infos = archive.infolist()

@@ -8,12 +8,18 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "aiosqlite>=0.22.1,<0.23.0",
     "alembic>=1.20.1,<2.0.0",
+    "beautifulsoup4>=4.15.0,<5.0.0",
     "fastapi>=0.162.0,<0.163.0",
+    "httpx>=0.28.1,<0.29.0",
     "itsdangerous>=2.2.0,<3.0.0",
     "jinja2>=3.1.6,<4.0.0",
+    "markdown-it-py>=4.2.0,<5.0.0",
     "pwdlib[argon2]>=0.3.1,<0.4.0",
     "pydantic-settings>=2.16.2,<3.0.0",
+    "pymupdf>=1.26,<2.0",
+    "python-docx>=1.2.0,<2.0.0",
     "python-multipart>=0.0.33,<0.0.34",
+    "python-pptx>=1.0.2,<2.0.0",
     "sqlalchemy[asyncio]>=2.1.8,<3.0.0",
     "sqlite-vec>=0.1.9,<0.2.0",
     "structlog>=26.1.0,<27.0.0",
@@ -31,7 +37,9 @@ target-version = "py312"
 select = ["E", "F", "W", "I", "B", "UP", "N", "S", "ASYNC", "RUF", "SIM", "PT"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "S105", "S106", "S603", "S607", "PT018"]
+"tests/**" = ["S101", "S105", "S106", "S603", "S607", "S608", "PT018"]
+# sentence-final punctuation and bullets of several scripts are intentional in these regexes
+"app/ingestion/chunker.py" = ["RUF001"]
 
 [tool.mypy]
 strict = true
@@ -46,7 +54,6 @@ asyncio_default_fixture_loop_scope = "function"
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1,<0.29.0",
     "mypy>=2.4.1,<3.0.0",
     "pytest>=9.2.0,<10.0.0",
     "pytest-asyncio>=1.4.1.post1,<2.0.0",
@@ -57,3 +64,12 @@ dev = [
 [[tool.mypy.overrides]]
 module = ["sqlite_vec"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["app.ingestion.parsers.pdf"]
+disallow_untyped_calls = false  # pymupdf ships no type hints
+
+[[tool.mypy.overrides]]
+module = ["tests.docfiles"]
+disallow_untyped_calls = false  # pymupdf ships no type hints
+disable_error_code = ["attr-defined"]

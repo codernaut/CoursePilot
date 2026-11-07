@@ -88,6 +88,14 @@ class Settings(BaseSettings):
     chat_daily_limit_per_user: int = Field(100, ge=1)
     agent_timeout_s: int = Field(60, ge=1)
 
+    # Processing worker
+    worker_poll_interval_s: float = Field(2.0, gt=0)
+    job_lock_timeout_s: int = Field(1800, ge=30)  # a running job older than this is re-queued
+    heartbeat_stale_s: int = Field(120, ge=15)  # no heartbeat for this long = the worker died
+    parse_max_pages: int = Field(2000, ge=1)  # pages (PDF) or slides (PPTX) per document
+    parse_timeout_s: int = Field(120, ge=1)  # per-document parsing time limit
+    embedding_batch_size: int = Field(64, ge=1, le=100)
+
     # Retention
     audit_retention_days: int = Field(365, ge=1)
     login_failed_audit_retention_days: int = Field(30, ge=1)

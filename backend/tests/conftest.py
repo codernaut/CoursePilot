@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi import FastAPI
@@ -19,6 +20,9 @@ from app.models import Document, User
 from app.models.enums import DocumentStatus, Role
 from app.services import structure
 from app.storage import new_key
+
+if TYPE_CHECKING:
+    from tests.ingest_support import Env
 
 TEST_PASSWORD = "correct horse battery"
 TEST_SECRET = "test-secret-key-" + "x" * 32
@@ -192,3 +196,13 @@ async def insert_document(
         db.add(document)
         await db.commit()
         return document
+
+
+@pytest.fixture
+async def ingest_env(tmp_path: Path, template_db: Path) -> AsyncIterator["Env"]:
+    """Temp database + local storage + fake embedder for pipeline and worker tests."""
+    from tests.ingest_support import build_env
+
+    env = await build_env(tmp_path, template_db)
+    yield env
+    await env.close()

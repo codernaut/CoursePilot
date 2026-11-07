@@ -1,10 +1,11 @@
 """Command line: ``python -m app.cli <command>``.
 
-Commands: setup, create-admin, seed-structure, migrate, check, start.
+Commands: setup, create-admin, seed-structure, migrate, check, start, reindex-all.
 """
 
 import argparse
 import asyncio
+import signal
 import subprocess
 import sys
 import threading
@@ -104,6 +105,54 @@ def run_create_admin(
     return 0
 
 
+def run_reindex_all(
+    settings: Settings, p: Prompter, *, yes: bool = False, database: Database | None = None
+) -> int:
+    """Rebuild the vector index after the embedding provider, model or dimension changed."""
+    from app.ingestion.embedder import EmbeddingNotConfiguredError, get_embedder
+    from app.ingestion.index_meta import config_from_settings
+    from app.services import reindex
+
+    try:
+        get_embedder(settings)
+    except EmbeddingNotConfiguredError as exc:
+        p.say(f"Cannot re-index: {exc.message}")
+        return 1
+    config = config_from_settings(settings)
+
+    async def _run() -> int:
+        db = database or Database(settings.database_url)
+        try:
+            total = await reindex.count_documents(db)
+            p.say(
+                f"This drops the search vectors and re-embeds {total} document(s) with "
+                f"{config.describe()}. Documents are not searchable until the worker has "
+                "processed them again (this can take a while and uses the embedding service)."
+            )
+            p.say("Stop the worker first if it is running, and start it again afterwards.")
+            if not yes and p.ask("Continue? [y/N]:").strip().lower() not in ("y", "yes"):
+                p.say("Cancelled. Nothing was changed.")
+                return 1
+            try:
+                summary = await reindex.reindex_all(db, settings)
+            except reindex.WorkerBusyError:
+                p.say(
+                    "Cannot re-index: a worker is running a job right now. Stop the worker "
+                    "(or wait until it is idle and stop it), then run this again."
+                )
+                return 1
+            p.say(
+                f"Done: {summary.documents} document(s) queued for re-indexing "
+                f"({summary.jobs_enqueued} new job(s)). Start the worker to process them."
+            )
+            return 0
+        finally:
+            if database is None:
+                await db.dispose()
+
+    return asyncio.run(_run())
+
+
 def default_setup_deps() -> SetupDeps:
     def migrate(settings: Settings) -> None:
         from pathlib import Path
@@ -118,6 +167,41 @@ def default_setup_deps() -> SetupDeps:
         create_admin=_create_admin,
         check_sqlite=check_sqlite_capabilities,
     )
+
+
+WORKER_STOP_GRACE_S = 25.0  # a little more than the worker's own 20 s shutdown grace
+
+
+def worker_popen_options(*, windows: bool | None = None) -> dict[str, Any]:
+    """Start the worker in its own process group / session: Windows can only send it a graceful
+    CTRL_BREAK_EVENT that way, and a console Ctrl+C no longer kills it behind our back."""
+    if windows is None:
+        windows = sys.platform == "win32"
+    if windows:
+        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+    return {"start_new_session": True}
+
+
+def stop_worker(
+    worker: Any, *, windows: bool | None = None, grace_s: float = WORKER_STOP_GRACE_S
+) -> None:
+    """Ask the worker to stop (it finishes or releases its job), wait ``grace_s``, then kill it."""
+    if windows is None:
+        windows = sys.platform == "win32"
+    if worker.poll() is not None:
+        return
+    try:
+        if windows:
+            worker.send_signal(getattr(signal, "CTRL_BREAK_EVENT", signal.SIGTERM))
+        else:
+            worker.terminate()
+    except (OSError, ValueError):  # already gone, or no console to signal
+        worker.terminate()
+    try:
+        worker.wait(timeout=grace_s)
+    except subprocess.TimeoutExpired:
+        worker.kill()
+        worker.wait(timeout=5)
 
 
 def run_start(
@@ -138,7 +222,9 @@ def run_start(
     host = "localhost" if settings.app_host in ("0.0.0.0", "::") else settings.app_host  # noqa: S104
     url = f"http://{host}:{settings.app_port}"
 
-    worker = popen([sys.executable, "-m", "app.worker"], cwd=str(BACKEND_DIR))
+    worker = popen(
+        [sys.executable, "-m", "app.worker"], cwd=str(BACKEND_DIR), **worker_popen_options()
+    )
     try:
         threading.Thread(
             target=lambda: ready(url) and open_browser(url), daemon=True, name="open-browser"
@@ -154,11 +240,7 @@ def run_start(
     except KeyboardInterrupt:
         pass
     finally:
-        worker.terminate()
-        try:
-            worker.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            worker.kill()
+        stop_worker(worker)
     return 0
 
 
@@ -184,6 +266,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("migrate", help="apply database migrations")
     sub.add_parser("check", help="verify SQLite, FTS5 and sqlite-vec")
     sub.add_parser("start", help="migrate, start the web app and worker, open the browser")
+    reindex = sub.add_parser(
+        "reindex-all",
+        help="rebuild the vector index after changing EMBEDDING_PROVIDER/MODEL/DIM",
+    )
+    reindex.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     return parser
 
 
@@ -209,6 +296,9 @@ def main(argv: Sequence[str] | None = None, *, prompter: Prompter | None = None)
     elif args.command == "create-admin":
         run_migrate(settings)
         return run_create_admin(settings, p, email=args.email)
+    elif args.command == "reindex-all":
+        run_migrate(settings)
+        return run_reindex_all(settings, p, yes=args.yes)
     elif args.command == "start":
         return run_start(settings)
     return 0

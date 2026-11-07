@@ -1,4 +1,5 @@
 import sqlite3
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -114,17 +115,70 @@ def test_unknown_command_is_rejected() -> None:
 
 
 class FakeProc:
-    def __init__(self) -> None:
-        self.terminated = False
+    """Stands in for ``subprocess.Popen``: records how it was asked to stop."""
+
+    def __init__(self, *, exits_on_stop: bool = True) -> None:
+        self.stopped_with: list[str] = []
+        self.killed = False
+        self.exits_on_stop = exits_on_stop
+        self.alive = True
+        self.wait_timeouts: list[float | None] = []
+
+    @property
+    def terminated(self) -> bool:
+        return bool(self.stopped_with)
+
+    def poll(self) -> int | None:
+        return None if self.alive else 0
 
     def terminate(self) -> None:
-        self.terminated = True
+        self.stopped_with.append("terminate")
+
+    def send_signal(self, sig: int) -> None:
+        self.stopped_with.append(f"signal:{int(sig)}")
 
     def wait(self, timeout: float | None = None) -> int:
-        return 0
+        self.wait_timeouts.append(timeout)
+        if self.killed or (self.exits_on_stop and self.stopped_with):
+            self.alive = False
+            return 0
+        raise subprocess.TimeoutExpired("worker", timeout or 0)
 
-    def kill(self) -> None:  # pragma: no cover
-        raise AssertionError("worker should exit after terminate")
+    def kill(self) -> None:
+        self.killed = True
+
+
+def test_worker_is_started_in_its_own_group_and_stopped_gracefully() -> None:
+    win = cli.worker_popen_options(windows=True)
+    assert win == {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+    assert cli.worker_popen_options(windows=False) == {"start_new_session": True}
+
+    import signal
+
+    proc = FakeProc()
+    cli.stop_worker(proc, windows=True, grace_s=25)
+    assert proc.stopped_with == [
+        f"signal:{int(getattr(signal, 'CTRL_BREAK_EVENT', signal.SIGTERM))}"
+    ]
+    assert not proc.killed and proc.wait_timeouts == [25]
+
+    posix = FakeProc()
+    cli.stop_worker(posix, windows=False)
+    assert posix.stopped_with == ["terminate"] and not posix.killed
+    assert posix.wait_timeouts == [cli.WORKER_STOP_GRACE_S] and cli.WORKER_STOP_GRACE_S >= 25
+
+
+def test_worker_that_ignores_the_stop_request_is_killed_after_the_grace_period() -> None:
+    proc = FakeProc(exits_on_stop=False)
+    cli.stop_worker(proc, windows=False, grace_s=25)
+    assert proc.killed and proc.wait_timeouts[0] == 25
+
+
+def test_stopping_a_worker_that_already_exited_does_nothing() -> None:
+    proc = FakeProc()
+    proc.alive = False
+    cli.stop_worker(proc, windows=False)
+    assert proc.stopped_with == [] and not proc.killed
 
 
 def test_start_migrates_runs_worker_and_server_then_cleans_up(settings: Settings) -> None:
