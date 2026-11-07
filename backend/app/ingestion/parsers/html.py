@@ -15,6 +15,7 @@ from app.ingestion.parsers.base import (
     ParseError,
     ParseLimits,
     TextBudget,
+    check_text_file_size,
     clean_heading,
     clean_text,
 )
@@ -41,6 +42,7 @@ _IGNORED_STRINGS = (Comment, Doctype, Declaration, ProcessingInstruction)
 
 
 def parse_html(data: bytes, limits: ParseLimits) -> ParsedDocument:
+    check_text_file_size(data, limits, "HTML")
     deadline = Deadline(limits.timeout_s)
     budget = TextBudget()
     try:

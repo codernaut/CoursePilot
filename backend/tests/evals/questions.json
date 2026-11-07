@@ -1,0 +1,21 @@
+[
+  {"id": "sort-merge", "question": "Why is merge sort stable?", "document": "Sorting algorithms", "page": null, "slide": null, "facts": ["equal items keep their original order"]},
+  {"id": "sort-quick-worst", "question": "When does quick sort become quadratic?", "document": "Sorting algorithms", "page": null, "slide": null, "facts": ["quadratic"]},
+  {"id": "sort-heap", "question": "How does heap sort work in place?", "document": "Sorting algorithms", "page": null, "slide": null, "facts": ["max-heap"], "module": "algorithms"},
+  {"id": "complexity-bigo", "question": "What does big O notation ignore?", "document": "Complexity analysis", "page": 1, "slide": null, "facts": ["constant factors"]},
+  {"id": "complexity-amortised", "question": "Why is appending to a dynamic array constant amortised cost?", "document": "Complexity analysis", "page": 2, "slide": null, "facts": ["capacity doubles"]},
+  {"id": "complexity-master", "question": "What does the master theorem solve?", "document": "Complexity analysis", "page": 3, "slide": null, "facts": ["recurrences"]},
+  {"id": "db-keys", "question": "What is a foreign key?", "document": "Relational databases", "page": null, "slide": 2, "facts": ["primary key of another table"]},
+  {"id": "db-normal", "question": "What does third normal form require?", "document": "Relational databases", "page": null, "slide": 3, "facts": ["depend only on the key"], "module": "databases"},
+  {"id": "db-acid", "question": "What does ACID stand for?", "document": "Relational databases", "page": null, "slide": 4, "facts": ["atomicity"]},
+  {"id": "db-btree", "question": "Why is a B-tree index fast for range searches?", "document": "Database indexes", "page": null, "slide": null, "facts": ["sorted order"]},
+  {"id": "db-hash", "question": "Can a hash index answer range queries?", "document": "Database indexes", "page": null, "slide": null, "facts": ["cannot help with range queries"]},
+  {"id": "eco-trophic", "question": "How much energy passes to the next trophic level?", "document": "Food webs", "page": 2, "slide": null, "facts": ["ten percent"]},
+  {"id": "eco-keystone", "question": "What happens to kelp forests when sea otters are removed?", "document": "Food webs", "page": 3, "slide": null, "facts": ["sea urchins"]},
+  {"id": "eco-nitrogen", "question": "Which bacteria turn nitrogen gas into ammonia?", "document": "Nutrient cycles", "page": null, "slide": null, "facts": ["ammonia"]},
+  {"id": "eco-carbon", "question": "How do fossil fuels change the carbon cycle?", "document": "Nutrient cycles", "page": null, "slide": null, "facts": ["fossil"], "module": "ecology"},
+  {"id": "eco-logistic", "question": "What is carrying capacity in logistic growth?", "document": "Population dynamics", "page": null, "slide": 2, "facts": ["carrying capacity"]},
+  {"id": "eco-lynx", "question": "Do lynx or hare numbers peak first?", "document": "Population dynamics", "page": null, "slide": 3, "facts": ["lagging behind the prey peak"]},
+  {"id": "eco-mark", "question": "How do you estimate a population by mark and recapture?", "document": "Field sampling", "page": null, "slide": null, "facts": ["marked animals recaptured"]},
+  {"id": "eco-transect", "question": "What is a transect used for?", "document": "Field sampling", "page": null, "slide": null, "facts": ["regular intervals"]}
+]

@@ -78,7 +78,7 @@ class Settings(BaseSettings):
 
     # Retrieval
     retrieval_top_k: int = Field(8, ge=1)
-    retrieval_min_score: float = 0.0
+    retrieval_min_score: float = Field(0.0, ge=0.0, le=1.0)  # min cosine similarity
     retrieval_min_hits: int = Field(1, ge=0)
     rerank_enabled: bool = False
 

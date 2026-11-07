@@ -2,7 +2,7 @@
 
 A RAG study assistant for a university programme's teaching material. Faculty upload slides, PDFs and notes into a fixed **Year › Block › Module** structure; students chat with an assistant that answers **from the uploaded material first, with citations**, and falls back to the web (clearly labelled) only when the material is insufficient.
 
-> Status: early development (milestones M0-M2 done: accounts, login, user admin, the programme structure, and material upload with a materials page; processing and chat come next). See [CLAUDE.md](CLAUDE.md) for scope, architecture and the build plan.
+> Status: early development (milestones M0-M4 done: accounts, login, user admin, the programme structure, material upload and background processing, and search with a passage viewer; chat comes next). See [CLAUDE.md](CLAUDE.md) for scope, architecture and the build plan.
 
 No Docker, no Node, no externally installed servers: SQLite (with sqlite-vec and FTS5) for data and search, a FastAPI app that serves the web UI and the JSON API, and a background worker. Everything installs with pip/uv.
 

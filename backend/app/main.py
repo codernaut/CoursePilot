@@ -1,6 +1,6 @@
 """FastAPI application factory."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -22,24 +22,39 @@ from app.core.middleware import (
 from app.core.startup import warn_if_insecure_http
 from app.core.version import get_commit
 from app.db.session import Database
+from app.ingestion.embedder import Embedder
+from app.retrieval.query_embedding import QueryEmbedder
 from app.services.auth import LoginThrottle
 from app.storage import get_storage
 from app.web.common import STATIC_DIR, make_templates
-from app.web.routes import admin_pages, auth_pages, materials_pages, structure_pages
+from app.web.routes import (
+    admin_pages,
+    auth_pages,
+    materials_pages,
+    search_pages,
+    structure_pages,
+)
 
 API_PREFIX = "/api/v1"
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    embedder_factory: Callable[[], Embedder] | None = None,
+) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level, json=settings.app_env != "development")
     warn_if_insecure_http(settings)
     get_commit()  # resolve once at startup; failures yield "unknown"
     database = Database(settings.database_url)
 
+    query_embedder = QueryEmbedder(settings, factory=embedder_factory)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         yield
+        await query_embedder.aclose()
         await database.dispose()
 
     app = FastAPI(
@@ -57,6 +72,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.password_throttle = LoginThrottle(settings.login_rate_limit_per_min)
     app.state.templates = make_templates()
     app.state.storage = get_storage(settings)
+    app.state.query_embedder = query_embedder
 
     # Added first = innermost, so its 413 responses still get the security headers and request id.
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_request_body_bytes)
@@ -69,6 +85,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin_pages.router)
     app.include_router(structure_pages.router)
     app.include_router(materials_pages.router)
+    app.include_router(search_pages.router)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     if not settings.is_production:

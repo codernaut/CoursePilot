@@ -15,7 +15,8 @@ from app.core.zip_guard import ZipGuardError, precheck_zip_directory
 
 SectionKind = Literal["body", "table", "speaker_notes", "caption"]
 
-MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024
+MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
+MAX_TEXT_FILE_BYTES = 5 * 1024 * 1024  # MD/TXT/HTML parse in one uninterruptible call
 MAX_TEXT_CHARS = 20_000_000  # extracted text per document
 MAX_HEADING_DEPTH = 6
 
@@ -38,6 +39,7 @@ class ParseLimits:
     max_pages: int = 2000
     timeout_s: float = 120.0
     max_uncompressed_bytes: int = MAX_UNCOMPRESSED_BYTES
+    max_text_file_bytes: int = MAX_TEXT_FILE_BYTES
     ocr_enabled: bool = False
 
 
@@ -122,6 +124,15 @@ def check_zip_container(data: bytes, limits: ParseLimits, label: str) -> None:
         raise ParseLimitError(
             f"This {label} file expands to more than "
             f"{limits.max_uncompressed_bytes // (1024 * 1024)} MB, which is not allowed."
+        )
+
+
+def check_text_file_size(data: bytes, limits: ParseLimits, label: str) -> None:
+    """MD/TXT/HTML parse in one uninterruptible call, so their size is capped up front."""
+    if len(data) > limits.max_text_file_bytes:
+        raise ParseLimitError(
+            f"This {label} file is larger than {limits.max_text_file_bytes // (1024 * 1024)} MB "
+            "of text, which is not allowed. Split it into smaller files."
         )
 
 

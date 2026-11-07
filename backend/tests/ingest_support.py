@@ -67,6 +67,7 @@ class Env:
         status: DocumentStatus = DocumentStatus.UPLOADED,
         job: JobType | None = None,
         week: str | None = None,
+        module_id: str | None = None,
     ) -> Document:
         key = new_key()
 
@@ -76,7 +77,7 @@ class Env:
         await self.storage.put(key, _body())
         async with self.database.session() as db:
             document = Document(
-                module_id=self.module_id,
+                module_id=module_id or self.module_id,
                 uploaded_by=self.user_id,
                 title=title or Path(filename).stem,
                 original_filename=filename,

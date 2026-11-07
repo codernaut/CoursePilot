@@ -1,0 +1,18 @@
+{# Reusable passage side panel. Elements with data-passage-id (search results now, [C#] citation
+   chips in chat later) open it; static/js/passage_panel.js fills it from GET /api/v1/chunks/{id}
+   using textContent only, so passage text is never interpreted as HTML. #}
+<div id="passage-backdrop" class="panel-backdrop" hidden></div>
+<aside id="passage-panel" class="passage-panel" role="dialog" aria-modal="true"
+       aria-labelledby="passage-title" tabindex="-1" hidden>
+  <div class="panel-header">
+    <h2 id="passage-title">Passage</h2>
+    <button type="button" id="passage-close" class="button button-small button-secondary">Close</button>
+  </div>
+  <p id="passage-status" class="muted" role="status" aria-live="polite"></p>
+  <div id="passage-body" hidden>
+    <p id="passage-path" class="passage-path"></p>
+    <p id="passage-location" class="muted"></p>
+    <blockquote id="passage-text" class="passage-text"></blockquote>
+    <p><a id="passage-link" href="#" target="_blank" rel="noopener noreferrer">Open document</a></p>
+  </div>
+</aside>

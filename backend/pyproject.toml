@@ -40,6 +40,8 @@ select = ["E", "F", "W", "I", "B", "UP", "N", "S", "ASYNC", "RUF", "SIM", "PT"]
 "tests/**" = ["S101", "S105", "S106", "S603", "S607", "S608", "PT018"]
 # sentence-final punctuation and bullets of several scripts are intentional in these regexes
 "app/ingestion/chunker.py" = ["RUF001"]
+# `where` is assembled from fixed fragments in this module; every value is a bind parameter
+"app/retrieval/hybrid.py" = ["S608"]
 
 [tool.mypy]
 strict = true
@@ -51,6 +53,8 @@ testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+addopts = "-m 'not eval'"
+markers = ["eval: retrieval quality evals with the real embedding provider (manual, costs API calls)"]
 
 [dependency-groups]
 dev = [

@@ -20,7 +20,7 @@ from app.storage import Storage
 
 # Total declared decompressed size allowed for a PPTX/DOCX. zipfile never yields more than the
 # declared size per member, so the declaration is a hard upper bound for any reader.
-MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024
+MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
 MAX_FILENAME_LENGTH = 200
 _MAX_EXTENSION_LENGTH = 16
 _SPOOL_BYTES = 8 * 1024 * 1024

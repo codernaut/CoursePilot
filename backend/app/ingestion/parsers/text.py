@@ -11,6 +11,7 @@ from app.ingestion.parsers.base import (
     ParseLimits,
     SectionKind,
     TextBudget,
+    check_text_file_size,
     clean_heading,
     clean_text,
 )
@@ -22,6 +23,7 @@ def decode_text(data: bytes) -> str:
 
 
 def parse_txt(data: bytes, limits: ParseLimits) -> ParsedDocument:
+    check_text_file_size(data, limits, "text")
     text = clean_text(decode_text(data))
     TextBudget().spend(text)
     sections = [ParsedSection(text=text)] if text else []
@@ -44,6 +46,7 @@ def _inline_text(token: Token) -> str:
 
 
 def parse_markdown(data: bytes, limits: ParseLimits) -> ParsedDocument:
+    check_text_file_size(data, limits, "Markdown")
     deadline = Deadline(limits.timeout_s)
     budget = TextBudget()
     # Raw HTML in Markdown becomes html_block / html_inline tokens, which we ignore.

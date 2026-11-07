@@ -322,3 +322,16 @@ def test_pdf_text_budget_stops_reading_pages_early(monkeypatch: pytest.MonkeyPat
     with pytest.raises(ParseLimitError, match="far more text"):
         parse_document("pdf", data, LIMITS)
     assert len(checks) < 12  # stopped while still reading pages, not after all twelve
+
+
+@pytest.mark.parametrize("extension", ["md", "txt", "html"])
+def test_text_formats_are_capped_before_parsing(extension: str) -> None:
+    small = ParseLimits(max_text_file_bytes=1024)
+    with pytest.raises(ParseLimitError, match="larger than"):
+        parse_document(extension, b"a " * 1024, small)
+    assert parse_document(extension, b"short text", small).sections
+
+
+def test_zip_formats_cap_is_200_mb() -> None:
+    assert ParseLimits().max_uncompressed_bytes == 200 * 1024 * 1024
+    assert ParseLimits().max_text_file_bytes == 5 * 1024 * 1024

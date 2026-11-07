@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Search - CoursePilot{% endblock %}
+{% block content %}
+<h1>Search the material</h1>
+<p class="muted">Searches the uploaded material of the whole programme. Every signed-in user can read all of it.</p>
+<form method="get" action="/search" class="search-form">
+  <div class="field">
+    <label for="search-q">Question or keywords</label>
+    <input id="search-q" type="text" name="q" value="{{ q }}" maxlength="2000" required>
+  </div>
+  <div class="search-options">
+    <div class="field">
+      <label for="search-module">Module</label>
+      <select id="search-module" name="module_id">
+        <option value="">All material</option>
+        {% for year in years %}
+        {% for block in year.blocks %}
+        <optgroup label="{{ year.title }} &rsaquo; {{ block.title }}">
+          {% for m in block.modules %}
+          <option value="{{ m.id }}"{% if module_id == m.id %} selected{% endif %}>{{ m.title }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endfor %}
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="search-scope">Search in</label>
+      <select id="search-scope" name="scope">
+        <option value="module"{% if scope == "module" %} selected{% endif %}>The selected module</option>
+        <option value="block"{% if scope == "block" %} selected{% endif %}>Its block</option>
+        <option value="all"{% if scope == "all" %} selected{% endif %}>All material</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="search-week">Week (optional)</label>
+      <input id="search-week" type="text" name="week" value="{{ week }}" maxlength="60">
+    </div>
+    <label class="checkbox" for="search-widen"><input id="search-widen" type="checkbox" name="widen" value="1"{% if widen %} checked{% endif %}> Widen automatically (module, then block, then all)</label>
+  </div>
+  <button type="submit" class="button">Search</button>
+</form>
+
+{% if error %}
+<p class="alert alert-error" role="alert">{{ error }}</p>
+{% elif searched %}
+<section aria-labelledby="results-heading" class="results">
+  <h2 id="results-heading">Results</h2>
+  {% for tier in tiers %}
+  <p class="muted">Searched {% if tier.scope.level == "module" %}the module{% elif tier.scope.level == "block" %}the block{% else %}all material{% endif %}: {{ tier.chunks | length }} passage{{ "" if tier.chunks | length == 1 else "s" }}{% if not tier.sufficient and not loop.last %}, widening the search{% endif %}.</p>
+  {% endfor %}
+  {% if hits %}
+  <ol class="hit-list">
+    {% for hit in hits %}
+    <li class="hit">
+      <h3>{{ hit.chunk.document_title }}{% if hit.chunk.location %} <span class="badge">{{ hit.chunk.location }}</span>{% endif %}</h3>
+      <p class="muted">{{ hit.chunk.path }}{% if hit.chunk.section_path %} &middot; {{ hit.chunk.section_path }}{% endif %}</p>
+      <p>{{ hit.snippet }}</p>
+      <button type="button" class="button button-small button-secondary" data-passage-id="{{ hit.chunk.chunk_id }}">View passage</button>
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p>No matching passages were found.</p>
+  {% endif %}
+</section>
+{% endif %}
+{% include "_passage_panel.html" %}
+<script src="/static/js/passage_panel.js" defer></script>
+{% endblock %}
