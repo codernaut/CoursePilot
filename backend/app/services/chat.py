@@ -40,14 +40,21 @@ from app.retrieval.access import AccessContext
 from app.retrieval.hybrid import PATH_SEPARATOR, SearchScope
 from app.retrieval.query_embedding import QueryEmbedder
 from app.schemas.chat import MAX_MESSAGE_CHARS
+from app.websearch.base import WebSearchProvider, clean_line
 
 log = get_logger(__name__)
 
 TITLE_CHARS = 60
+AGENT_UNAVAILABLE_MESSAGE = "The assistant is temporarily unavailable. Please try again later."
 TURN_HOLD_PADDING_S = 30.0  # a lost release frees itself after the agent timeout plus this
 LIST_LIMIT = 200
 
 SseEvent = tuple[str, dict[str, Any]]
+
+
+class AgentUnavailable(Exception):  # noqa: N818 - not an error type users see
+    """The chat models could not be created for a reason other than a missing key (the real
+    reason is logged). Surfaced as the ``agent_error`` SSE event / a page banner, never a 500."""
 
 
 # -- one running turn per user ------------------------------------------------------------
@@ -258,6 +265,7 @@ async def prepare_turn(
     message: str,
     module_id: str | None,
     conversation_id: str | None,
+    web: WebSearchProvider | None = None,
 ) -> PreparedTurn:
     """Validate, check quota and providers, take the per-user turn slot and persist the user
     message (committed). Raises ``AppError`` (404/409/422/429) or ``ProviderNotConfigured``; in
@@ -292,15 +300,22 @@ async def prepare_turn(
         embedder.ensure_configured()
     except EmbeddingNotConfiguredError as exc:
         raise ProviderNotConfigured(exc.message) from exc
+    except ProviderNotConfigured:
+        raise
+    except Exception as exc:
+        log.error("chat_models_failed", error=type(exc).__name__, reason=str(exc)[:300])
+        raise AgentUnavailable from exc
     context = AgentContext(
         access=AccessContext.from_user(user),
         scope=SearchScope("module", module.id) if module else SearchScope("all"),
         module_path=path,
-        scope_label=module.title if module else "all material",
+        scope_label=safe_scope_label(module.title) if module else "all material",
         database=database,
         settings=settings,
         embedder=embedder,
         models=models,
+        web=web,
+        web_enabled=module.web_search_enabled if module else True,
     )
 
     if not turns.acquire(user.id):
@@ -344,6 +359,10 @@ async def prepare_turn(
     )
 
 
+def safe_scope_label(title: str) -> str:
+    return clean_line(title, 120) or "this module"
+
+
 def provider_problem(runtime: AgentRuntime, embedder: QueryEmbedder) -> str | None:
     """Why chat cannot work right now (which setting is missing), or ``None`` when it can. The
     text is for administrators; everyone else only gets the short message."""
@@ -354,6 +373,9 @@ def provider_problem(runtime: AgentRuntime, embedder: QueryEmbedder) -> str | No
         return exc.hint
     except EmbeddingNotConfiguredError as exc:
         return exc.message
+    except Exception as exc:
+        log.error("chat_models_failed", error=type(exc).__name__, reason=str(exc)[:300])
+        return AGENT_UNAVAILABLE_MESSAGE
     return None
 
 
@@ -489,6 +511,7 @@ async def run_turn(
                 "usage": result.usage,
                 "latency_ms": latency_ms,
                 "searched": result.searched,
+                "used_web": result.used_web,
             },
         )
     finally:

@@ -18,6 +18,7 @@ from app.llm.factory import ChatModels
 from app.retrieval.access import AccessContext
 from app.retrieval.hybrid import SearchScope
 from app.retrieval.query_embedding import QueryEmbedder
+from app.websearch.base import WebSearchProvider
 
 HISTORY_MAX_TURNS = 6  # question/answer pairs sent to the model
 HISTORY_MAX_CHARS = 8000  # and at most this many characters of them
@@ -35,7 +36,12 @@ class AgentState(TypedDict, total=False):
     searched: list[str]  # levels searched in order, e.g. ["module", "block"]
     sufficient: bool
     has_wider: bool
+    web_allowed: bool  # the last material tier is insufficient and web search may run
+    web_status: str  # "" | "searched" | "no_results" | "failed" | "not_configured" | "disabled"
+    web_results: list[dict[str, Any]]  # WebResult.to_dict(), cleared at the end of the turn
+    web_queries: list[str]
     answer: str
+    used_web: bool
     citations: list[dict[str, Any]]
     dropped_markers: list[str]
     usage: dict[str, Any]
@@ -52,6 +58,10 @@ class AgentContext:
     settings: Settings
     embedder: QueryEmbedder
     models: ChatModels
+    # Web fallback (M6): the provider is None when web search is not configured; ``web_enabled``
+    # is the module's toggle (always True for "All material": the global setting decides).
+    web: WebSearchProvider | None = None
+    web_enabled: bool = True
 
 
 def new_turn_input(question: str) -> dict[str, Any]:
@@ -64,7 +74,12 @@ def new_turn_input(question: str) -> dict[str, Any]:
         "searched": [],
         "sufficient": False,
         "has_wider": False,
+        "web_allowed": False,
+        "web_status": "",
+        "web_results": [],
+        "web_queries": [],
         "answer": "",
+        "used_web": False,
         "citations": [],
         "dropped_markers": [],
         "usage": {},

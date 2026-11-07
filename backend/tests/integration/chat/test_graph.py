@@ -159,26 +159,39 @@ async def test_nothing_found_says_so_without_calling_the_answer_model(
         await db.execute(text("UPDATE documents SET status = 'failed'"))
         await db.commit()
     result, events = await run(runtime, context, QUESTION)
-    assert result.answer == prompts.NOT_FOUND_MESSAGE
+    assert result.answer == prompts.NOT_FOUND_NO_WEB_MESSAGE  # web search is not configured here
     assert result.citations == []
     assert llms.main.calls == []
-    assert ("token", prompts.NOT_FOUND_MESSAGE) in events
+    assert ("token", prompts.NOT_FOUND_NO_WEB_MESSAGE) in events
 
 
-async def test_there_is_no_web_node_in_the_graph() -> None:
+async def test_the_graph_has_a_web_node_reachable_only_after_the_last_tier() -> None:
     nodes = set(build_graph().get_graph().nodes)
     assert nodes == {
         "__start__",
         "rewrite",
         "retrieve",
         "assess",
+        "web_search",
         "answer",
         "validate_citations",
         "__end__",
     }
-    assert route_after_assess({"sufficient": False, "has_wider": False}) == "answer"
-    assert route_after_assess({"sufficient": False, "has_wider": True}) == "retrieve"
-    assert route_after_assess({"sufficient": True, "has_wider": True}) == "answer"
+    assert (
+        route_after_assess({"sufficient": False, "has_wider": False, "web_allowed": False})
+        == "answer"
+    )
+    assert (
+        route_after_assess({"sufficient": False, "has_wider": False, "web_allowed": True})
+        == "web_search"
+    )
+    # a wider tier always comes first, whatever web_allowed says
+    assert route_after_assess({"sufficient": False, "has_wider": True, "web_allowed": True}) == (
+        "retrieve"
+    )
+    assert route_after_assess({"sufficient": True, "has_wider": False, "web_allowed": True}) == (
+        "answer"
+    )
 
 
 async def test_follow_up_questions_are_rewritten_from_the_history(
@@ -304,4 +317,4 @@ async def test_an_inactive_user_retrieves_nothing(
     user = await insert_user(app, email="gone@example.edu", role=Role.STUDENT, active=False)
     context = await build_context(app, llms, scope=SearchScope("all"), user=user)
     result, _ = await run(runtime, context, QUESTION)
-    assert result.answer == prompts.NOT_FOUND_MESSAGE and result.citations == []
+    assert result.answer == prompts.NOT_FOUND_NO_WEB_MESSAGE and result.citations == []

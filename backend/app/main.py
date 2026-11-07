@@ -38,6 +38,7 @@ from app.web.routes import (
     search_pages,
     structure_pages,
 )
+from app.websearch.factory import WebSearchFactory, build_web_search
 
 API_PREFIX = "/api/v1"
 
@@ -47,6 +48,7 @@ def create_app(
     *,
     embedder_factory: Callable[[], Embedder] | None = None,
     llm_factory: LLMFactory | None = None,
+    web_search_factory: WebSearchFactory | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level, json=settings.app_env != "development")
@@ -55,11 +57,14 @@ def create_app(
     database = Database(settings.database_url)
 
     query_embedder = QueryEmbedder(settings, factory=embedder_factory)
+    web_search = (web_search_factory or build_web_search)(settings)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         yield
         await query_embedder.aclose()
+        if web_search is not None:
+            await web_search.aclose()
         await database.dispose()
 
     app = FastAPI(
@@ -79,6 +84,7 @@ def create_app(
     app.state.storage = get_storage(settings)
     app.state.query_embedder = query_embedder
     app.state.agent_runtime = AgentRuntime(settings, llm_factory)
+    app.state.web_search = web_search
     app.state.chat_turns = make_turn_registry(settings)
 
     # Added first = innermost, so its 413 responses still get the security headers and request id.

@@ -11,7 +11,7 @@ def test_prompt_version_is_set() -> None:
 def test_system_prompt_names_the_module_path_and_the_rules() -> None:
     system = prompts.build_system_prompt("Year 1 › Block 2 › Module 3")
     assert "Year 1 › Block 2 › Module 3" in system
-    for needle in ("[C1]", "untrusted DATA", "Never invent", "Do not use the internet"):
+    for needle in ("[C1]", "untrusted DATA", "Never invent", "From the web", "[W1]"):
         assert needle in system
     assert "all material" in prompts.build_system_prompt(None)
 

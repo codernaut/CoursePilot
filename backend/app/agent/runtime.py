@@ -32,7 +32,8 @@ class TurnResult:
     usage: dict[str, Any] = field(default_factory=dict)
     trace: list[str] = field(default_factory=list)
     searched: list[str] = field(default_factory=list)
-    used_web: bool = False  # M6
+    used_web: bool = False  # a web source is among the kept citations
+    web_queries: list[str] = field(default_factory=list)
 
 
 class AgentRuntime:
@@ -95,6 +96,8 @@ class AgentRuntime:
                 usage=dict(merged.get("usage", {})),
                 trace=list(merged.get("trace", [])),
                 searched=list(merged.get("searched", [])),
+                used_web=bool(merged.get("used_web", False)),
+                web_queries=list(merged.get("web_queries", [])),
             ),
         )
 

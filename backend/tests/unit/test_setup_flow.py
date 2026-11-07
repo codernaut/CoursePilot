@@ -89,6 +89,15 @@ def test_mask() -> None:
     assert "abcdefghij" not in mask("sk-ant-abcdefghij1234")
 
 
+def test_setup_explains_that_web_search_is_optional_and_query_only(tmp_path: Path) -> None:
+    code, p, _, env_path = _run(tmp_path, ["9001", *FRESH_DEFAULTS[1:], *ADMIN_ANSWERS])
+    assert code == 0
+    shown = p.everything_shown
+    assert "Web search (optional)" in shown and "Only the search query is sent" in shown
+    assert "not configured" in shown
+    assert EnvFile.load(env_path, EXAMPLE).get("WEB_SEARCH_PROVIDER") == "tavily"
+
+
 def test_fresh_setup_writes_env_generates_secret_and_creates_admin(tmp_path: Path) -> None:
     code, p, deps, env_path = _run(tmp_path, ["9001", *FRESH_DEFAULTS[1:], *ADMIN_ANSWERS])
     assert code == 0

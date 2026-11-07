@@ -1,13 +1,16 @@
 """The agent graph (CLAUDE.md section 9): an explicit LangGraph ``StateGraph``.
 
     START -> rewrite -> retrieve -> assess --(insufficient and a wider tier exists)--> retrieve
+                                        |--(last tier insufficient, web ok)--> web_search -> answer
                                         \\--(otherwise)--> answer -> validate_citations -> END
 
 The order "material first, web last" lives in the graph, not in a prompt: the first retrieval
 always happens (``rewrite`` always leads to ``retrieve``), widening goes module -> block -> all and
 only when the current tier is insufficient, and the model cannot skip or redirect retrieval. The
-``assess`` node's model judgement can only mark a tier insufficient. M6 inserts a ``web_search``
-node on the edge from ``assess`` to ``answer`` for the case "insufficient and no wider tier".
+``assess`` node's model judgement can only mark a tier insufficient. The ``web_search`` node sits
+on the edge from ``assess`` to ``answer`` and runs only when the LAST tier is insufficient, the
+module web toggle is on and a provider is configured (``assess`` decides this from the runtime
+context, never from model output).
 
 Nodes get who is asking and the scope from the runtime context (``AgentContext``), never from state
 or model output. Status and token events are emitted through LangGraph's stream writer.
@@ -42,6 +45,7 @@ from app.agent.state import (
 )
 from app.core.logging import get_logger
 from app.retrieval.hybrid import RetrievedChunk
+from app.websearch.base import WebResult
 
 log = get_logger(__name__)
 
@@ -108,6 +112,10 @@ def _add_usage(current: dict[str, Any], message: BaseMessage | None) -> dict[str
 
 def _chunks(state: AgentState) -> list[RetrievedChunk]:
     return [RetrievedChunk(**d) for d in state.get("chunks", [])]
+
+
+def _web_results(state: AgentState) -> list[WebResult]:
+    return [WebResult.from_dict(d) for d in state.get("web_results", [])]
 
 
 def _trace(state: AgentState, entry: str) -> list[str]:
@@ -193,30 +201,76 @@ async def assess(state: AgentState, runtime: Ctx) -> dict[str, Any]:
     update["sufficient"] = sufficient
     if not sufficient and has_wider:
         update["tier_index"] = state.get("tier_index", 0) + 1
+    elif not sufficient:  # the last tier is insufficient: the web may be searched
+        why_not = tools.web_available(runtime.context)
+        update["web_allowed"] = not why_not
+        update["web_status"] = why_not
     return update
 
 
-def route_after_assess(state: AgentState) -> Literal["retrieve", "answer"]:
-    """Widen when the tier is insufficient and a wider one exists. (M6: when it is insufficient
-    and nothing wider exists, go to ``web_search`` here instead of ``answer``.)"""
+def route_after_assess(state: AgentState) -> Literal["retrieve", "web_search", "answer"]:
+    """Widen when the tier is insufficient and a wider one exists; when nothing wider exists and
+    the web may be searched, go to ``web_search``; otherwise answer."""
     if not state.get("sufficient") and state.get("has_wider"):
         return "retrieve"
+    if not state.get("sufficient") and state.get("web_allowed"):
+        return "web_search"
     return "answer"
+
+
+async def web_search(state: AgentState, runtime: Ctx) -> dict[str, Any]:
+    """Search the web (at most WEB_MAX_QUERIES queries): first the rewritten standalone query,
+    then, if that found nothing, the original wording of the question. Only query text leaves."""
+    _emit("status", text="Searching the web…")
+    candidates = [state["query"]]
+    if state["question"] != state["query"]:
+        candidates.append(state["question"])
+    found = await tools.search_web(runtime.context, queries=candidates)
+    status = "searched" if found.results else ("failed" if found.failed else "no_results")
+    return {
+        "web_results": [r.to_dict() for r in found.results],
+        "web_queries": found.queries,
+        "web_status": status,
+        "trace": _trace(state, "web_search"),
+    }
+
+
+def _web_note(status: str) -> str | None:
+    if status == "no_results":
+        return "The web was searched for this question and returned no usable results."
+    if status == "failed":
+        return "The web search failed, so no web results are available."
+    return None
+
+
+def _not_found(status: str) -> str:
+    if status == "not_configured":
+        return prompts.NOT_FOUND_NO_WEB_MESSAGE
+    if status in ("no_results", "failed"):
+        return prompts.NOT_FOUND_WEB_MESSAGE
+    return prompts.NOT_FOUND_MESSAGE
 
 
 async def answer(state: AgentState, runtime: Ctx) -> dict[str, Any]:
     ctx = runtime.context
     chunks = _chunks(state)
+    web = _web_results(state)
+    status = state.get("web_status", "")
     trace = _trace(state, "answer")
-    if not chunks:
-        _emit("token", text=prompts.NOT_FOUND_MESSAGE)
-        return {"answer": prompts.NOT_FOUND_MESSAGE, "trace": trace}
+    if not chunks and not web:
+        message = _not_found(status)
+        _emit("token", text=message)
+        return {"answer": message, "trace": trace}
     _emit("status", text="Writing the answer…")
-    registry = Registry.from_chunks(chunks)
+    registry = Registry.from_sources(chunks, web)
     messages: list[BaseMessage] = [
         SystemMessage(content=prompts.build_system_prompt(ctx.module_path)),
         *trim_history(state.get("messages", [])),
-        HumanMessage(content=prompts.build_answer_human(state["question"], registry.pairs())),
+        HumanMessage(
+            content=prompts.build_answer_human(
+                state["question"], registry.pairs(), registry.web_pairs(), _web_note(status)
+            )
+        ),
     ]
     parts: list[str] = []
     final: AIMessageChunk | None = None
@@ -238,7 +292,7 @@ async def answer(state: AgentState, runtime: Ctx) -> dict[str, Any]:
 
 
 async def validate_citations_node(state: AgentState, runtime: Ctx) -> dict[str, Any]:
-    registry = Registry.from_chunks(_chunks(state))
+    registry = Registry.from_sources(_chunks(state), _web_results(state))
     checked = validate_citations(state.get("answer", ""), registry)
     stored = [
         HumanMessage(content=state["question"]),
@@ -252,7 +306,9 @@ async def validate_citations_node(state: AgentState, runtime: Ctx) -> dict[str, 
         "answer": checked.text,
         "citations": cited_payloads(registry, checked.cited),
         "dropped_markers": checked.dropped,
+        "used_web": any(m in registry.web for m in checked.cited),
         "chunks": [],  # the checkpoint keeps only the conversation, not copies of the material
+        "web_results": [],  # nor of the web results
         "messages": [*removals, *stored],
         "trace": _trace(state, "validate_citations"),
     }
@@ -268,12 +324,14 @@ def build_graph(
     graph.add_node("rewrite", rewrite)
     graph.add_node("retrieve", retrieve)
     graph.add_node("assess", assess)
+    graph.add_node("web_search", web_search)
     graph.add_node("answer", answer)
     graph.add_node("validate_citations", validate_citations_node)
     graph.add_edge(START, "rewrite")
     graph.add_edge("rewrite", "retrieve")
     graph.add_edge("retrieve", "assess")
-    graph.add_conditional_edges("assess", route_after_assess, ["retrieve", "answer"])
+    graph.add_conditional_edges("assess", route_after_assess, ["retrieve", "web_search", "answer"])
+    graph.add_edge("web_search", "answer")
     graph.add_edge("answer", "validate_citations")
     graph.add_edge("validate_citations", END)
     return graph.compile(checkpointer=checkpointer)

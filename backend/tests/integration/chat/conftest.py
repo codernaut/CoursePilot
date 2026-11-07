@@ -23,6 +23,7 @@ from app.models import Document, User
 from app.models.enums import Role
 from app.retrieval.access import AccessContext
 from app.retrieval.hybrid import SearchScope
+from app.websearch.base import WebSearchProvider
 from tests.conftest import Actor, insert_user, make_settings
 from tests.ingest_support import DIM, MODEL, configure_fake_index
 from tests.integration.search.conftest import ingest_markdown, module_ids
@@ -111,6 +112,8 @@ async def build_context(
     scope: SearchScope,
     module_path: str | None = None,
     user: User | None = None,
+    web: WebSearchProvider | None = None,
+    web_enabled: bool = True,
 ) -> AgentContext:
     user = user or await insert_user(app, email="ctx@example.edu", role=Role.STUDENT)
     return AgentContext(
@@ -122,6 +125,8 @@ async def build_context(
         settings=app.state.settings,
         embedder=app.state.query_embedder,
         models=llms.models(),
+        web=web,
+        web_enabled=web_enabled,
     )
 
 

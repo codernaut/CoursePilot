@@ -61,15 +61,22 @@
     return map;
   }
 
+  /* `kind` is the stable key of a citation ("material" | "web"); `type` carries the same value. */
+  function isWeb(citation, marker) {
+    return (citation && (citation.kind === "web" || citation.type === "web")) ||
+      (!citation && marker.charAt(0) === "W");
+  }
+
   function chipFor(marker, citation) {
     if (!citation) { return document.createTextNode("[" + marker + "]"); }
-    if (marker.charAt(0) === "W" || citation.type === "web") {
+    if (isWeb(citation, marker)) {
       if (!isHttpUrl(citation.url)) { return document.createTextNode("[" + marker + "]"); }
       var link = el("a", "citation-chip citation-web", marker);
       link.setAttribute("href", citation.url);
       link.setAttribute("target", "_blank");
       link.setAttribute("rel", "noopener noreferrer");
       link.setAttribute("aria-label", "Web source " + marker + ": " + (citation.title || citation.url));
+      link.setAttribute("title", [citation.site, citation.title].filter(Boolean).join(" - "));
       return link;
     }
     var chip = el("button", "citation-chip", marker);
@@ -101,24 +108,48 @@
     if (last < text.length) { container.appendChild(document.createTextNode(text.slice(last))); }
   }
 
-  function renderSources(item, citations) {
-    var old = item.querySelector(".message-sources");
-    if (old) { old.remove(); }
-    if (!citations || !citations.length) { return; }
-    var box = el("div", "message-sources");
-    box.appendChild(el("p", "message-sources-title", "Sources from the material"));
-    var ul = el("ul", "source-list");
-    citations.forEach(function (c) {
-      if (c.type === "web") { return; }
-      var li = el("li");
-      li.appendChild(chipFor(c.marker, c));
-      var where = [c.document_title || "Document", c.location, c.path].filter(Boolean).join(" · ");
-      li.appendChild(document.createTextNode(" " + where));
-      ul.appendChild(li);
-    });
-    box.appendChild(ul);
+  function insertSources(item, box) {
     var tools = item.querySelector(".message-tools");
     item.insertBefore(box, tools);
+  }
+
+  /* Material sources and, in a separate labelled block, the sources from the web. */
+  function renderSources(item, citations) {
+    Array.prototype.forEach.call(item.querySelectorAll(".message-sources"), function (n) { n.remove(); });
+    if (!citations || !citations.length) { return; }
+    var material = citations.filter(function (c) { return !isWeb(c, c.marker || ""); });
+    var web = citations.filter(function (c) { return isWeb(c, c.marker || "") && isHttpUrl(c.url); });
+    if (material.length) {
+      var box = el("div", "message-sources");
+      box.appendChild(el("p", "message-sources-title", "Sources from the material"));
+      var ul = el("ul", "source-list");
+      material.forEach(function (c) {
+        var li = el("li");
+        li.appendChild(chipFor(c.marker, c));
+        var where = [c.document_title || "Document", c.location, c.path].filter(Boolean).join(" · ");
+        li.appendChild(document.createTextNode(" " + where));
+        ul.appendChild(li);
+      });
+      box.appendChild(ul);
+      insertSources(item, box);
+    }
+    if (web.length) {
+      var webBox = el("div", "message-sources message-web");
+      webBox.setAttribute("role", "group");
+      webBox.setAttribute("aria-label", "From the web");
+      webBox.appendChild(el("p", "message-sources-title", "From the web"));
+      webBox.appendChild(el("p", "muted", "The course material did not cover this. These sources are not part of it."));
+      var webList = el("ul", "source-list");
+      web.forEach(function (c) {
+        var li = el("li");
+        li.appendChild(chipFor(c.marker, c));
+        li.appendChild(document.createTextNode(" " + [c.site, c.title].filter(Boolean).join(" - ") + " "));
+        li.appendChild(el("span", "muted web-url", c.url));
+        webList.appendChild(li);
+      });
+      webBox.appendChild(webList);
+      insertSources(item, webBox);
+    }
   }
 
   function parseCitations(node) {

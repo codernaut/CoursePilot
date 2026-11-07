@@ -25,7 +25,9 @@ async def _page(
     problem = chat_service.provider_problem(get_runtime(request), embedder)
     is_admin = ctx.user.role == Role.ADMIN
     provider_message = None
-    if problem is not None:
+    if problem == chat_service.AGENT_UNAVAILABLE_MESSAGE:
+        provider_message = problem
+    elif problem is not None:
         provider_message = (
             f"AI provider not configured: {problem}"
             if is_admin

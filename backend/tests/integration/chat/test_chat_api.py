@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from httpx import AsyncClient, Response
 from sqlalchemy import func, select, text
 
-from app.agent.prompts import NOT_FOUND_MESSAGE, PROMPT_VERSION
+from app.agent.prompts import NOT_FOUND_NO_WEB_MESSAGE, PROMPT_VERSION
 from app.agent.runtime import AgentRuntime
 from app.core.config import Settings
 from app.ingestion.embedder import EmbeddingNotConfiguredError, FakeEmbedder
@@ -132,10 +132,10 @@ async def test_nothing_found_stores_the_plain_answer_without_citations(
     student = await make_actor(Role.STUDENT)
     events = sse_of(await ask(student))  # an empty programme
     assert dict(events)["citations"]["citations"] == []
-    assert dict(events)["citations"]["content"] == NOT_FOUND_MESSAGE
+    assert dict(events)["citations"]["content"] == NOT_FOUND_NO_WEB_MESSAGE
     assert llms.main.calls == []
     done = dict(events)["done"]
-    assert (await messages_of(app, done["conversation_id"]))[-1].content == NOT_FOUND_MESSAGE
+    assert (await messages_of(app, done["conversation_id"]))[-1].content == NOT_FOUND_NO_WEB_MESSAGE
 
 
 async def test_all_material_conversation_has_no_module(

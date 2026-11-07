@@ -290,6 +290,9 @@ tbody th { font-weight: 600; }
 }
 .citation-chip:hover { background: #d3e1fc; }
 .citation-web { border-color: #8a5a00; background: var(--warn-bg); color: var(--warn-text); }
+.message-web { border-left: 4px solid #8a5a00; background: var(--warn-bg); color: var(--warn-text); padding: 0.5rem 0.75rem; border-radius: 4px; }
+.message-web .muted { color: var(--warn-text); }
+.web-url { font-size: 0.85em; }
 .feedback { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
 .feedback .button[aria-pressed="true"] { background: var(--primary); color: var(--primary-text); border-color: var(--primary); }
 .chat-status { min-height: 1.5rem; }

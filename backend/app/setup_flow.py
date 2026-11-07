@@ -360,6 +360,13 @@ def run_setup(
         p.say("Your embedding settings changed in this run, so re-index existing material.")
 
     # Web search
+    p.say(
+        "Web search (optional): only when the uploaded material cannot answer a question, the "
+        "assistant can search the internet through Tavily and says clearly which parts of its "
+        "answer come from the web. Only the search query is sent to Tavily. Without a key the "
+        "assistant answers from the material only and says that web search is not configured "
+        "(WEB_SEARCH_PROVIDER stays 'tavily'; set it to 'none' to switch the feature off)."
+    )
     _ask_key(p, env, "TAVILY_API_KEY", "Tavily web search API key (optional)")
 
     env.write(env_path)

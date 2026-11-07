@@ -91,6 +91,15 @@ async def chat(
             message=body.message,
             module_id=body.module_id,
             conversation_id=body.conversation_id,
+            web=request.app.state.web_search,
+        )
+    except chat_service.AgentUnavailable:
+        return StreamingResponse(
+            _single(
+                chat_service.error_event("agent_error", chat_service.AGENT_UNAVAILABLE_MESSAGE)
+            ),
+            media_type="text/event-stream",
+            headers=SSE_HEADERS,
         )
     except ProviderNotConfigured as exc:
         event = chat_service.provider_error_event(exc, is_admin=ctx.user.role.value == "admin")

@@ -2,7 +2,7 @@
 
 A RAG study assistant for a university programme's teaching material. Faculty upload slides, PDFs and notes into a fixed **Year › Block › Module** structure; students chat with an assistant that answers **from the uploaded material first, with citations**, and falls back to the web (clearly labelled) only when the material is insufficient.
 
-> Status: early development (milestones M0-M5 done: accounts, login, user admin, the programme structure, material upload and background processing, search with a passage viewer, and chat with cited answers from the material; the web fallback comes next). See [CLAUDE.md](CLAUDE.md) for scope, architecture and the build plan.
+> Status: early development (milestones M0-M6 done: accounts, login, user admin, the programme structure, material upload and background processing, search with a passage viewer, chat with cited answers from the material, and the labelled web fallback). See [CLAUDE.md](CLAUDE.md) for scope, architecture and the build plan.
 
 No Docker, no Node, no externally installed servers: SQLite (with sqlite-vec and FTS5) for data and search, a FastAPI app that serves the web UI and the JSON API, and a background worker. Everything installs with pip/uv.
 
@@ -20,7 +20,7 @@ start.bat
 ./start.sh
 ```
 
-`setup` installs [uv](https://docs.astral.sh/uv/) if needed, installs dependencies, asks for the first admin account, your AI provider (Anthropic Claude or Google Gemini), an embedding provider and optional Tavily key (any key may be skipped), writes `.env`, and prepares the database. `start` runs migrations, starts the web app and the worker, and opens your browser at http://localhost:8000. There is no self-registration: the admin creates faculty and student accounts.
+`setup` installs [uv](https://docs.astral.sh/uv/) if needed, installs dependencies, asks for the first admin account, your AI provider (Anthropic Claude or Google Gemini), an embedding provider and optional Tavily key for the web fallback (any key may be skipped; without a Tavily key the assistant answers from the material only and says that web search is not configured; faculty and admins can switch web search off per module on the Programme structure page), writes `.env`, and prepares the database. `start` runs migrations, starts the web app and the worker, and opens your browser at http://localhost:8000. There is no self-registration: the admin creates faculty and student accounts.
 
 ### Letting other computers connect (no HTTPS)
 

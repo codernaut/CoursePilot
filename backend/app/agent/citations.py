@@ -1,9 +1,10 @@
 """Citation registry, marker parsing and validation (CLAUDE.md section 9).
 
 Material sources are ``C1``, ``C2``... (the numbered ``<source>`` blocks given to the model); web
-sources (``W1``...) come with M6. After generation every marker is checked against the registry:
-unknown markers are removed from the text and only the sources that were actually cited are
-returned. Markers inside code spans or fenced code are left alone and do not count.
+sources are ``W1``, ``W2``... (the ``<web_result>`` blocks, M6). After generation every marker
+is checked against the registry: unknown markers are removed from the text and only the
+sources that were actually cited are returned. Markers inside code spans or fenced code are
+left alone and do not count.
 """
 
 import re
@@ -12,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.retrieval.hybrid import RetrievedChunk
+from app.websearch.base import WebResult
 
 # [C1], [W12], [C1, C2] (grouped) and runs of adjacent brackets such as [C1][C2]; the blanks
 # before a run are consumed together with it when none of its markers is valid.
@@ -23,24 +25,36 @@ _ID_FINDER = re.compile(_ID)
 _CODE = re.compile(r"```.*?(?:```|\Z)|`[^`\n]*`", re.DOTALL)
 
 MATERIAL_PREFIX = "C"
+WEB_PREFIX = "W"
 SNIPPET_CHARS = 300
 
 
 @dataclass(frozen=True)
 class Registry:
-    """``marker -> chunk`` for the sources given to the model, in marker order."""
+    """``marker -> source`` for the sources given to the model, in marker order."""
 
     material: dict[str, RetrievedChunk] = field(default_factory=dict)
+    web: dict[str, WebResult] = field(default_factory=dict)
 
     @classmethod
     def from_chunks(cls, chunks: Sequence[RetrievedChunk]) -> "Registry":
-        return cls({f"{MATERIAL_PREFIX}{i}": chunk for i, chunk in enumerate(chunks, start=1)})
+        return cls.from_sources(chunks, ())
+
+    @classmethod
+    def from_sources(cls, chunks: Sequence[RetrievedChunk], web: Sequence[WebResult]) -> "Registry":
+        return cls(
+            {f"{MATERIAL_PREFIX}{i}": chunk for i, chunk in enumerate(chunks, start=1)},
+            {f"{WEB_PREFIX}{i}": result for i, result in enumerate(web, start=1)},
+        )
 
     def __contains__(self, marker: object) -> bool:
-        return marker in self.material
+        return marker in self.material or marker in self.web
 
     def pairs(self) -> list[tuple[str, RetrievedChunk]]:
         return list(self.material.items())
+
+    def web_pairs(self) -> list[tuple[str, WebResult]]:
+        return list(self.web.items())
 
 
 @dataclass(frozen=True)
@@ -87,11 +101,13 @@ def strip_markers(text: str) -> str:
 
 
 def citation_payload(marker: str, chunk: RetrievedChunk) -> dict[str, Any]:
-    """The structured source the UI shows for a marker (also stored in ``messages.citations``)."""
+    """The structured source the UI shows for a marker (also stored in ``messages.citations``).
+    ``kind`` (``material`` | ``web``) is the key the UI branches on; ``type`` is the same value."""
     flat = " ".join(chunk.text.split())
     snippet = flat if len(flat) <= SNIPPET_CHARS else flat[:SNIPPET_CHARS].rstrip() + "…"
     return {
         "marker": marker,
+        "kind": "material",
         "type": "material",
         "chunk_id": chunk.chunk_id,
         "document_id": chunk.document_id,
@@ -107,5 +123,24 @@ def citation_payload(marker: str, chunk: RetrievedChunk) -> dict[str, Any]:
     }
 
 
+def web_citation_payload(marker: str, result: WebResult) -> dict[str, Any]:
+    return {
+        "marker": marker,
+        "kind": "web",
+        "type": "web",
+        "url": result.url,
+        "title": result.title,
+        "site": result.site,
+        "snippet": result.snippet[:SNIPPET_CHARS],
+        "retrieved_at": result.retrieved_at.isoformat(),
+    }
+
+
 def cited_payloads(registry: Registry, cited: Sequence[str]) -> list[dict[str, Any]]:
-    return [citation_payload(m, registry.material[m]) for m in cited if m in registry]
+    out: list[dict[str, Any]] = []
+    for marker in cited:
+        if marker in registry.material:
+            out.append(citation_payload(marker, registry.material[marker]))
+        elif marker in registry.web:
+            out.append(web_citation_payload(marker, registry.web[marker]))
+    return out

@@ -122,3 +122,21 @@ def test_payload_snippet_is_flattened_and_truncated() -> None:
     assert len(snippet) <= 301 and snippet.endswith("…") and "  " not in snippet
     slide = citation_payload("C1", chunk(1, slide_number=4, page_start=None, page_end=None))
     assert slide["location"] == "slide 4"
+
+
+def test_web_markers_are_validated_like_material_markers() -> None:
+    from app.agent.citations import cited_payloads, validate_citations
+    from app.websearch.fake import make_result
+
+    registry = Registry.from_sources([chunk(1)], [make_result(1), make_result(2)])
+    checked = validate_citations("a [C1] b [W2] c [W3][W1] d [C2] `[W9]`", registry)
+    assert checked.cited == ["C1", "W2", "W1"]
+    assert checked.dropped == ["W3", "C2"]
+    assert "[W3]" not in checked.text and "`[W9]`" in checked.text  # code spans are left alone
+    payloads = cited_payloads(registry, checked.cited)
+    assert [(p["marker"], p["kind"]) for p in payloads] == [
+        ("C1", "material"),
+        ("W2", "web"),
+        ("W1", "web"),
+    ]
+    assert payloads[1]["url"] == "https://example.org/page-2"
