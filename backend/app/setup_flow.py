@@ -325,6 +325,8 @@ def run_setup(
     llm_key = LLM_KEY_VARS[provider]
     _ask_key(p, env, llm_key, f"{provider.capitalize()} API key (optional)")
     asked_keys.add(llm_key)
+    if provider == "gemini":
+        p.say("Gemini chat and Gemini embeddings share GOOGLE_API_KEY, so it is asked only once.")
 
     # Embeddings
     p.say("Embeddings are independent of the chat model (Anthropic has no embeddings API).")

@@ -7,6 +7,7 @@ from starlette.responses import Response
 
 from app.api.deps import CurrentUser, DbDep, SettingsDep
 from app.core.errors import AppError
+from app.models.enums import Role
 from app.retrieval.access import AccessContext
 from app.retrieval.hybrid import SearchFilters
 from app.services import search as search_service
@@ -62,6 +63,6 @@ async def search_page(
                 {"chunk": c, "snippet": search_service.snippet(c.text)} for c in outcome.chunks
             ]
         except AppError as exc:
-            context["error"] = exc.message
+            context["error"] = exc.message_for(ctx.user.role == Role.ADMIN)
             status_code = exc.status_code
     return render(request, "search.html", context, status_code=status_code)

@@ -30,3 +30,15 @@ licensed. Check the licence of every new dependency before adding it (CLAUDE.md 
 | `httpx` | BSD-3-Clause | Embedding provider calls (also the test client). |
 
 All of these are AGPL-compatible. `uv.lock` holds the exact versions.
+
+### Direct dependencies added in M5 (chat and the agent)
+
+| Package | Licence | Notes |
+|---|---|---|
+| `langgraph` | MIT | The agent `StateGraph`. |
+| `langgraph-checkpoint-sqlite` | MIT | `AsyncSqliteSaver`, chat memory in `CHECKPOINT_DB_PATH`. |
+| `langchain`, `langchain-core` | MIT | `init_chat_model` and the chat-model interface. Pull in `langsmith` (MIT; tracing stays off). |
+| `langchain-anthropic` | MIT | Uses the `anthropic` SDK (Apache-2.0). |
+| `langchain-google-genai` | MIT | Uses `google-genai` (Apache-2.0). |
+
+All of these are AGPL-compatible. `uv.lock` holds the exact versions.

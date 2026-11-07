@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Chat - CoursePilot{% endblock %}
+{% block content %}
+<h1>Chat</h1>
+<div id="chat-app" class="chat-layout"
+     data-conversation-id="{{ current.conversation.id if current else '' }}"
+     data-max-chars="{{ max_chars }}"
+     data-provider-ok="{{ 'false' if provider_message else 'true' }}">
+  <aside class="chat-sidebar" aria-label="Your conversations">
+    <a class="button button-small" href="/chat">New chat</a>
+    <ul id="conversation-list" class="conversation-list">
+      {% for view in conversations %}
+      <li class="conversation-item{% if current and current.conversation.id == view.conversation.id %} is-current{% endif %}" data-conversation-id="{{ view.conversation.id }}">
+        <a href="/chat/{{ view.conversation.id }}"{% if current and current.conversation.id == view.conversation.id %} aria-current="page"{% endif %}>
+          <span class="conversation-title">{{ view.conversation.title }}</span>
+          <span class="muted conversation-scope">{{ view.module_path or "All material" }}</span>
+        </a>
+        <button type="button" class="link-button conversation-delete" data-delete-conversation="{{ view.conversation.id }}" aria-label="Delete conversation: {{ view.conversation.title }}">Delete</button>
+      </li>
+      {% endfor %}
+    </ul>
+    <p id="conversation-empty" class="muted"{% if conversations %} hidden{% endif %}>No conversations yet.</p>
+  </aside>
+
+  <section class="chat-main" aria-labelledby="chat-heading">
+    <h2 id="chat-heading" class="visually-hidden">Conversation</h2>
+    <div class="field chat-scope">
+      <label for="chat-module">Ask about</label>
+      <select id="chat-module"{% if current %} disabled{% endif %}>
+        <option value="">All material</option>
+        {% for year in years %}
+        {% for block in year.blocks %}
+        <optgroup label="{{ year.title }} &rsaquo; {{ block.title }}">
+          {% for m in block.modules %}
+          <option value="{{ m.id }}"{% if module_id == m.id %} selected{% endif %}>{{ m.title }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endfor %}
+        {% endfor %}
+      </select>
+      {% if current %}<p class="muted">This conversation is about {{ current.module_path or "all material" }}.</p>{% endif %}
+    </div>
+
+    {% if provider_message %}
+    <p id="provider-alert" class="alert alert-error" role="alert">{{ provider_message }}</p>
+    {% else %}
+    <p id="provider-alert" class="alert alert-error" role="alert" hidden></p>
+    {% endif %}
+
+    <ol id="messages" class="messages" aria-label="Messages">
+      {% for m in messages %}
+      <li class="message message-{{ m.role.value }}" data-message-id="{{ m.id }}" data-role="{{ m.role.value }}">
+        <p class="message-author">{{ "You" if m.role.value == "user" else "CoursePilot" }}</p>
+        <div class="message-text" data-citations='{{ m.citations | tojson }}'>{{ m.content }}</div>
+        {% if m.role.value == "assistant" %}
+        <div class="message-tools" data-feedback="{{ m.feedback.value if m.feedback else '' }}"></div>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+
+    <div id="chat-status" class="chat-status muted" role="status" aria-live="polite"></div>
+
+    <form id="chat-form" class="chat-form" autocomplete="off">
+      <label for="chat-input">Your question</label>
+      <textarea id="chat-input" rows="3" maxlength="{{ max_chars }}" required{% if provider_message %} disabled{% endif %}></textarea>
+      <div class="chat-actions">
+        <button type="submit" id="chat-send" class="button"{% if provider_message %} disabled{% endif %}>Send</button>
+        <button type="button" id="chat-stop" class="button button-secondary" hidden>Stop</button>
+        <span class="muted">Answers come from the uploaded material and cite their sources.</span>
+      </div>
+    </form>
+  </section>
+</div>
+{% include "_passage_panel.html" %}
+<script src="/static/js/passage_panel.js" defer></script>
+<script src="/static/js/chat.js" defer></script>
+{% endblock %}

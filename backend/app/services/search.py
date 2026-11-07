@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
-from app.core.errors import AppError, not_found, validation_error
+from app.core.errors import AppError, not_found, provider_not_configured, validation_error
 from app.core.logging import get_logger
 from app.ingestion.embedder import EmbeddingError, EmbeddingNotConfiguredError
 from app.ingestion.index_meta import ensure_index_matches
@@ -82,7 +82,7 @@ async def resolve_scope(
     return SearchScope("block", block.id)
 
 
-async def _prepare(
+async def prepare_query_vector(
     db: AsyncSession, settings: Settings, embedder: QueryEmbedder, query: str
 ) -> list[float]:
     """The embedding invariant first (503 ``index_mismatch``), then the query vector. There is no
@@ -92,7 +92,7 @@ async def _prepare(
     try:
         return await embedder.embed(query)
     except EmbeddingNotConfiguredError as exc:
-        raise AppError("provider_not_configured", exc.message, status_code=503) from exc
+        raise provider_not_configured(exc.message) from exc
     except EmbeddingError as exc:
         # The provider's message is for faculty/admins (logs), not for every signed-in user.
         log.warning("query_embedding_failed", reason=exc.message, retryable=exc.retryable)
@@ -116,7 +116,7 @@ async def search(
     top_k: int | None = None,
 ) -> SearchOutcome:
     query = clean_query(query)
-    vector = await _prepare(db, settings, embedder, query)
+    vector = await prepare_query_vector(db, settings, embedder, query)
     k = top_k or settings.retrieval_top_k
     if widen:
         tiers = await search_tiered(

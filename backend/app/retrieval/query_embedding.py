@@ -81,6 +81,10 @@ class QueryEmbedder:
             self._embedder = self._factory()
         return self._embedder
 
+    def ensure_configured(self) -> None:
+        """Raise ``EmbeddingNotConfiguredError`` now instead of at the first query."""
+        self._get()
+
     async def embed(self, query: str) -> list[float]:
         embedder = self._get()  # raises when the provider is not configured
         key: CacheKey = (embedder.provider, embedder.model, embedder.dim, normalise_query(query))

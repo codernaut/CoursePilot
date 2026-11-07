@@ -260,19 +260,32 @@ async def test_index_mismatch_is_503(
     assert "reindex-all" in error["message"]
 
 
-async def test_provider_not_configured_is_503(
+async def test_provider_not_configured_is_503_short_for_users_hint_for_admins(
     app: FastAPI, settings: Settings, make_actor: ActorFactory, corpus: dict[str, Any]
 ) -> None:
     def broken() -> FakeEmbedder:
-        raise EmbeddingNotConfiguredError("The Gemini embedding provider is not configured.")
+        raise EmbeddingNotConfiguredError("The Gemini embedding provider needs GOOGLE_API_KEY.")
 
     app.state.query_embedder = QueryEmbedder(settings, factory=broken)
-    actor = await make_actor(Role.STUDENT)
-    response = await actor.client.get("/api/v1/search", params={"q": "heap"})
+    short = "AI provider not configured. Ask an administrator."
+    for role in (Role.STUDENT, Role.FACULTY):
+        actor = await make_actor(role)
+        response = await actor.client.get("/api/v1/search", params={"q": "heap"})
+        assert response.status_code == 503
+        error = response.json()["error"]
+        assert error["code"] == "provider_not_configured" and error["message"] == short
+        assert "GOOGLE_API_KEY" not in response.text
+        # no silent keyword-only fallback: nothing is returned
+        assert "hits" not in response.json()
+        page = await actor.client.get("/search", params={"q": "heap"})
+        assert page.status_code == 503 and short in page.text and "GOOGLE_API_KEY" not in page.text
+    admin = await make_actor(Role.ADMIN)
+    response = await admin.client.get("/api/v1/search", params={"q": "heap"})
     assert response.status_code == 503
-    assert response.json()["error"]["code"] == "provider_not_configured"
-    # no silent keyword-only fallback: nothing is returned
-    assert "hits" not in response.json()
+    message = response.json()["error"]["message"]
+    assert message.startswith("AI provider not configured:") and "GOOGLE_API_KEY" in message
+    page = await admin.client.get("/search", params={"q": "heap"})
+    assert "GOOGLE_API_KEY" in page.text
 
 
 async def test_identical_queries_reuse_the_cached_query_vector(

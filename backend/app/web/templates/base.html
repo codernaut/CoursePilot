@@ -17,6 +17,7 @@
     <nav aria-label="Main">
       <ul class="nav">
         <li><a href="/"{% if request.url.path == "/" %} aria-current="page"{% endif %}>Home</a></li>
+        <li><a href="/chat"{% if request.url.path == "/chat" or request.url.path.startswith("/chat/") %} aria-current="page"{% endif %}>Chat</a></li>
         <li><a href="/search"{% if request.url.path == "/search" %} aria-current="page"{% endif %}>Search</a></li>
         <li><a href="/materials"{% if request.url.path == "/materials" or request.url.path.endswith("/materials") %} aria-current="page"{% endif %}>Materials</a></li>
         <li><a href="/structure"{% if request.url.path == "/structure" %} aria-current="page"{% endif %}>Programme</a></li>

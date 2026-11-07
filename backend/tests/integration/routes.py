@@ -58,12 +58,27 @@ def route_table(ids: dict[str, str]) -> list[Route]:
         Route("GET", f"{api}/search?q=heap", expected=(401, 503, 503, 503)),
         Route("GET", f"{api}/search", expected=(401, 422, 422, 422)),
         Route("GET", f"{api}/chunks/{'0' * 32}", expected=(401, 404, 404, 404)),
+        # Chat: authentication first; the default test app has no LLM key, so a chat request
+        # that passes validation streams an `error` event (still 200). Conversations are private:
+        # an id that is not the caller's is 404 for every role, admins included.
+        Route("POST", f"{api}/chat", {"message": "hello"}, expected=(401, 200, 200, 200)),
+        Route("GET", f"{api}/conversations", expected=(401, 200, 200, 200)),
+        Route("GET", f"{api}/conversations/{'0' * 32}", expected=(401, 404, 404, 404)),
+        Route("DELETE", f"{api}/conversations/{'0' * 32}", expected=(401, 404, 404, 404)),
+        Route(
+            "POST",
+            f"{api}/messages/{'0' * 32}/feedback",
+            {"feedback": "up"},
+            expected=(401, 404, 404, 404),
+        ),
         Route("GET", f"{api}/auth/me", expected=(401, 200, 200, 200)),
         Route("GET", f"{api}/openapi.json", expected=(401, 200, 200, 200)),
         # HTML pages (anonymous users are redirected to /login)
         Route("GET", "/", expected=(anon_page, 200, 200, 200)),
         Route("GET", "/structure", expected=(anon_page, 200, 200, 200)),
         Route("GET", "/change-password", expected=(anon_page, 200, 200, 200)),
+        Route("GET", "/chat", expected=(anon_page, 200, 200, 200)),
+        Route("GET", f"/chat/{'0' * 32}", expected=(anon_page, 404, 404, 404)),
         Route("GET", "/search", expected=(anon_page, 200, 200, 200)),
         Route("GET", "/search?q=heap", expected=(anon_page, 503, 503, 503)),
         Route("GET", "/materials", expected=(anon_page, 200, 200, 200)),

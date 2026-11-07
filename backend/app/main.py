@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
+from app.agent.runtime import AgentRuntime
 from app.api.deps import CurrentUser
 from app.api.router import api_router
 from app.core.config import Settings, get_settings
@@ -23,13 +24,16 @@ from app.core.startup import warn_if_insecure_http
 from app.core.version import get_commit
 from app.db.session import Database
 from app.ingestion.embedder import Embedder
+from app.llm.factory import LLMFactory
 from app.retrieval.query_embedding import QueryEmbedder
 from app.services.auth import LoginThrottle
+from app.services.chat import make_turn_registry
 from app.storage import get_storage
 from app.web.common import STATIC_DIR, make_templates
 from app.web.routes import (
     admin_pages,
     auth_pages,
+    chat_pages,
     materials_pages,
     search_pages,
     structure_pages,
@@ -42,6 +46,7 @@ def create_app(
     settings: Settings | None = None,
     *,
     embedder_factory: Callable[[], Embedder] | None = None,
+    llm_factory: LLMFactory | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level, json=settings.app_env != "development")
@@ -73,6 +78,8 @@ def create_app(
     app.state.templates = make_templates()
     app.state.storage = get_storage(settings)
     app.state.query_embedder = query_embedder
+    app.state.agent_runtime = AgentRuntime(settings, llm_factory)
+    app.state.chat_turns = make_turn_registry(settings)
 
     # Added first = innermost, so its 413 responses still get the security headers and request id.
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_request_body_bytes)
@@ -86,6 +93,7 @@ def create_app(
     app.include_router(structure_pages.router)
     app.include_router(materials_pages.router)
     app.include_router(search_pages.router)
+    app.include_router(chat_pages.router)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     if not settings.is_production:
