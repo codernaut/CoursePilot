@@ -8,7 +8,12 @@ rows in ONE write transaction (CLAUDE.md sections 6.2 and 7.3).
   inside it) leaves the previous chunks untouched.
 * A document the API marked ``deleting`` in the meantime is never made ``ready`` again: the
   results are discarded and the delete job removes the rest.
-* CPU-heavy steps (parsing, chunking) run in a worker thread, never on the event loop.
+* CPU-heavy steps run off the event loop: chunking in a worker thread, parsing in a killable child
+  process when ``PipelineDeps.parser_pool`` is set (the worker always sets it; see
+  ``parser_pool.py``), otherwise in a thread.
+* A re-index of a ``ready`` document keeps it ``ready`` (its old chunks stay searchable) with
+  ``reindexing`` set; the old chunks are replaced in the final transaction. If the re-index fails,
+  the document stays ``ready`` with the error shown and the old chunks untouched.
 """
 
 import asyncio
@@ -27,6 +32,7 @@ from app.db.session import Database
 from app.ingestion.chunker import DocChunk, chunk_document
 from app.ingestion.embedder import Embedder, EmbeddingError
 from app.ingestion.index_meta import ensure_index_matches
+from app.ingestion.parser_pool import ParserPool
 from app.ingestion.parsers import ParseError, ParseLimitError, ParseLimits, parse_document
 from app.jobs.base import JobError
 from app.models import AuditLog, Chunk, Document, Module
@@ -51,6 +57,7 @@ class PipelineDeps:
     storage: Storage
     settings: Settings
     embedder_factory: Callable[[], Embedder]
+    parser_pool: ParserPool | None = None  # None: parse in a thread (tests, small tools)
 
 
 @dataclass(frozen=True)
@@ -166,19 +173,23 @@ async def _process(deps: PipelineDeps, document_id: str) -> Outcome:
         document = await db.get(Document, document_id)
         if document is None:
             return Outcome.DISCARDED
-        document.status = DocumentStatus.PROCESSING
+        if document.status == DocumentStatus.READY:
+            # A re-index: stay `ready` so the old chunks remain searchable until replaced.
+            document.reindexing = True
+        else:
+            document.status = DocumentStatus.PROCESSING
+            document.reindexing = False
         document.error = None
         await db.commit()
 
     embedder = deps.embedder_factory()  # raises EmbeddingNotConfiguredError without a key
     try:
         data = await _read_file(deps.storage, info.storage_key, settings.upload_max_mb * _MB + 1)
-        parsed = await asyncio.to_thread(
-            parse_document,
-            PurePath(info.filename).suffix.lstrip(".").lower(),
-            data,
-            _limits(settings),
-        )
+        extension = PurePath(info.filename).suffix.lstrip(".").lower()
+        if deps.parser_pool is not None:
+            parsed = await deps.parser_pool.parse(extension, data, _limits(settings))
+        else:
+            parsed = await asyncio.to_thread(parse_document, extension, data, _limits(settings))
         del data
         chunks = await asyncio.to_thread(
             chunk_document,
@@ -206,6 +217,7 @@ async def _process(deps: PipelineDeps, document_id: str) -> Outcome:
         await chunk_store.delete_document_index(db, document_id)
         await chunk_store.insert_chunks(db, _to_chunk_rows(info, chunks, embedder.model), vectors)
         document.status = DocumentStatus.READY
+        document.reindexing = False
         document.error = None
         document.page_count = parsed.page_count
         await db.commit()
@@ -247,12 +259,16 @@ async def delete_document(deps: PipelineDeps, document_id: str) -> bool:
 
 
 async def mark_failed(database: Database, document_id: str, message: str) -> None:
-    """Show a failure on the document (unless it is being deleted or is gone)."""
+    """Show a failure on the document (unless it is being deleted or is gone). A failed re-index
+    of a ``ready`` document leaves it ``ready`` and searchable (old chunks untouched) and only
+    shows the error."""
     async with database.session() as db:
         document = await db.get(Document, document_id)
         if document is None or document.status == DocumentStatus.DELETING:
             return
-        document.status = DocumentStatus.FAILED
+        document.reindexing = False
+        if document.status != DocumentStatus.READY:
+            document.status = DocumentStatus.FAILED
         document.error = message[:MAX_ERROR_LENGTH]
         await db.commit()
 

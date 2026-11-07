@@ -85,6 +85,14 @@ def test_real_repo_version_is_readable() -> None:
     assert br.read_version(SCRIPT.parents[1]).count(".") >= 2
 
 
+def test_the_real_repository_passes_the_release_secret_scan() -> None:
+    """Test fixtures and docs must not look like real keys, or tagging a release would fail."""
+    repo = SCRIPT.parents[1]
+    files = br.collect_files(repo)
+    findings = br.scan_for_secrets([(f, (repo / f).read_bytes()) for f in files])
+    assert findings == []
+
+
 # --- exclusion rules -------------------------------------------------------------------------
 
 

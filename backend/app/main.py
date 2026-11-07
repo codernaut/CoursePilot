@@ -16,11 +16,13 @@ from app.core.config import Settings, get_settings
 from app.core.errors import register_error_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import (
+    AccessLogMiddleware,
     BodySizeLimitMiddleware,
     RequestIdMiddleware,
     SecurityHeadersMiddleware,
 )
 from app.core.startup import warn_if_insecure_http
+from app.core.tracing import apply_tracing_policy
 from app.core.version import get_commit
 from app.db.session import Database
 from app.ingestion.embedder import Embedder
@@ -28,9 +30,11 @@ from app.llm.factory import LLMFactory
 from app.retrieval.query_embedding import QueryEmbedder
 from app.services.auth import LoginThrottle
 from app.services.chat import make_turn_registry
+from app.services.rate_limit import SlidingWindowLimiter
 from app.storage import get_storage
 from app.web.common import STATIC_DIR, make_templates
 from app.web.routes import (
+    admin_ops_pages,
     admin_pages,
     auth_pages,
     chat_pages,
@@ -53,6 +57,7 @@ def create_app(
     settings = settings or get_settings()
     configure_logging(settings.log_level, json=settings.app_env != "development")
     warn_if_insecure_http(settings)
+    apply_tracing_policy(settings)
     get_commit()  # resolve once at startup; failures yield "unknown"
     database = Database(settings.database_url)
 
@@ -86,16 +91,21 @@ def create_app(
     app.state.agent_runtime = AgentRuntime(settings, llm_factory)
     app.state.web_search = web_search
     app.state.chat_turns = make_turn_registry(settings)
+    # Per-user, in-process (not shared between processes; see services/rate_limit.py).
+    app.state.chat_limiter = SlidingWindowLimiter(settings.chat_rate_limit_per_min)
+    app.state.upload_limiter = SlidingWindowLimiter(settings.upload_rate_limit_per_min)
 
     # Added first = innermost, so its 413 responses still get the security headers and request id.
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_request_body_bytes)
     app.add_middleware(SecurityHeadersMiddleware, hsts=settings.secure_cookies)
     app.add_middleware(RequestIdMiddleware)
+    app.add_middleware(AccessLogMiddleware)  # outermost: logs every request, whatever the outcome
     register_error_handlers(app)
 
     app.include_router(api_router, prefix=API_PREFIX)
     app.include_router(auth_pages.router)
     app.include_router(admin_pages.router)
+    app.include_router(admin_ops_pages.router)
     app.include_router(structure_pages.router)
     app.include_router(materials_pages.router)
     app.include_router(search_pages.router)

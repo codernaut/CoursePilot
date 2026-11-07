@@ -78,6 +78,7 @@ async def reindex_all(database: Database, settings: Settings) -> ReindexSummary:
         enqueued = 0
         for document in documents:
             document.status = DocumentStatus.UPLOADED
+            document.reindexing = False  # not searchable now; the whole document is pending
             document.error = None
             if document.id not in already_queued:
                 enqueue(db, JobType.REINDEX_DOCUMENT, {"document_id": document.id})

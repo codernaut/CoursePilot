@@ -23,6 +23,8 @@
         <li><a href="/structure"{% if request.url.path == "/structure" %} aria-current="page"{% endif %}>Programme</a></li>
         {% if user.role.value == "admin" %}
         <li><a href="/admin/users"{% if request.url.path == "/admin/users" %} aria-current="page"{% endif %}>Users</a></li>
+        <li><a href="/admin/jobs"{% if request.url.path.startswith("/admin/jobs") %} aria-current="page"{% endif %}>Jobs</a></li>
+        <li><a href="/admin/usage"{% if request.url.path == "/admin/usage" %} aria-current="page"{% endif %}>Usage</a></li>
         {% endif %}
         <li><a href="/change-password">Change password</a></li>
       </ul>

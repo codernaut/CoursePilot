@@ -18,7 +18,8 @@ class DocumentOut(BaseModel):
     size_bytes: int
     content_sha256: str
     status: DocumentStatus
-    error: str | None
+    error: str | None  # a failed (re-)index; a ready document keeps its old chunks
+    reindexing: bool = False  # ready and searchable while a re-index is pending or running
     page_count: int | None
     chunk_count: int | None = None  # text chunks indexed (listing and detail only)
     week: str | None

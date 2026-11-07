@@ -26,8 +26,10 @@ class AppError(Exception):
         status_code: int = 400,
         details: dict[str, Any] | None = None,
         admin_message: str | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(message)
+        self.headers = headers or {}
         self.code = code
         self.message = message
         self.status_code = status_code
@@ -51,11 +53,16 @@ def provider_not_configured(hint: str) -> AppError:
 
 
 def error_response(
-    status_code: int, code: str, message: str, details: dict[str, Any] | None = None
+    status_code: int,
+    code: str,
+    message: str,
+    details: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
         content={"error": {"code": code, "message": message, "details": details or {}}},
+        headers=headers,
     )
 
 
@@ -120,7 +127,9 @@ async def _app_error_handler(request: Request, exc: Exception) -> Response:
             is_admin = getattr(user, "role", None) == Role.ADMIN
         except Exception:  # e.g. a detached ORM instance: fall back to the short message
             is_admin = False
-    return error_response(exc.status_code, exc.code, exc.message_for(is_admin), exc.details)
+    return error_response(
+        exc.status_code, exc.code, exc.message_for(is_admin), exc.details, exc.headers
+    )
 
 
 async def _http_error_handler(_: Request, exc: Exception) -> JSONResponse:

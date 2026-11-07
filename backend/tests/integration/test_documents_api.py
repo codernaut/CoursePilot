@@ -761,7 +761,7 @@ async def test_delete_hides_the_document_and_enqueues_a_job(
     assert len(await all_rows(app, Job)) == 1
 
 
-async def test_reindex_enqueues_a_job_and_resets_status(
+async def test_reindex_enqueues_a_job_and_keeps_a_ready_document_ready(
     app: FastAPI, make_actor: ActorFactory, doc_id: str
 ) -> None:
     faculty = await make_actor(Role.FACULTY)
@@ -769,7 +769,8 @@ async def test_reindex_enqueues_a_job_and_resets_status(
         f"/api/v1/documents/{doc_id}/reindex", headers=faculty.headers
     )
     assert response.status_code == 202
-    assert response.json()["status"] == "uploaded"
+    # Still ready (and searchable) while the new index is built; flagged as re-indexing.
+    assert response.json()["status"] == "ready" and response.json()["reindexing"] is True
     (job,) = await all_rows(app, Job)
     assert job.type == JobType.REINDEX_DOCUMENT and job.payload == {"document_id": doc_id}
     audits = [a for a in await all_rows(app, AuditLog) if a.action == "document_reindex_requested"]
@@ -812,6 +813,7 @@ async def test_reindex_of_a_failed_document_clears_the_error(
     )
     assert response.status_code == 202
     assert response.json()["error"] is None
+    assert response.json()["status"] == "uploaded" and response.json()["reindexing"] is False
 
 
 # --- download --------------------------------------------------------------------------------

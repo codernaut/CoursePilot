@@ -1,6 +1,17 @@
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    false,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, BaseModel, TimestampMixin, enum_column, new_id
@@ -28,6 +39,11 @@ class Document(BaseModel, Base):
         nullable=False,
     )
     error: Mapped[str | None] = mapped_column(Text)
+    # True while a re-index of a READY document is pending or running. The document stays
+    # `ready` (its old chunks stay searchable) until the new chunks replace them.
+    reindexing: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false(), nullable=False
+    )
     page_count: Mapped[int | None] = mapped_column(Integer)
     week: Mapped[str | None] = mapped_column(String(60))
 

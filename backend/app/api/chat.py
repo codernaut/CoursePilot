@@ -20,6 +20,7 @@ from app.schemas.chat import (
 )
 from app.services import chat as chat_service
 from app.services.chat import SseEvent, TurnRegistry
+from app.services.rate_limit import SlidingWindowLimiter
 
 router = APIRouter(tags=["chat"])
 
@@ -62,7 +63,10 @@ async def _frames(
     responses={
         200: {"content": {"text/event-stream": {}}, "description": "Server-sent events"},
         404: {"description": "Unknown module, or a conversation that is not yours"},
-        429: {"description": "Daily quota used up, or another turn of yours is still running"},
+        429: {
+            "description": "Rate limit (Retry-After), daily quota used up, or another turn of "
+            "yours is still running"
+        },
     },
 )
 async def chat(
@@ -79,6 +83,8 @@ async def chat(
     (``code``, ``message``). The conversation id is also in the ``X-Conversation-Id`` header."""
     runtime = get_runtime(request)
     turns = get_turns(request)
+    limiter: SlidingWindowLimiter = request.app.state.chat_limiter
+    limiter.enforce(ctx.user.id, "chat")  # per-minute burst cap; the daily quota is in prepare_turn
     try:
         prepared = await chat_service.prepare_turn(
             db,

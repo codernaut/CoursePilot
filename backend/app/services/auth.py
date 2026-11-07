@@ -4,6 +4,7 @@ The ``AuthProvider`` protocol is the seam for adding SSO later; ``PasswordAuthPr
 local email + argon2 implementation. Nothing here imports FastAPI.
 """
 
+import math
 import time
 from collections import deque
 from collections.abc import Callable
@@ -91,6 +92,17 @@ class LoginThrottle:
             self._hits.setdefault(key, deque()).append(now)
         return True
 
+    def retry_after(self, *keys: str) -> int:
+        """Whole seconds (at least 1) until a request limited by any of ``keys`` may be retried:
+        the time the oldest counted hit of the most-blocked key stays in the window."""
+        now = self._clock()
+        waits = [
+            self.window - (now - self._prune(key, now)[0])
+            for key in keys
+            if len(self._prune(key, now)) >= self.limit
+        ]
+        return max(1, math.ceil(max(waits, default=self.window)))
+
     # Generic per-key variant (used for change-password attempts): the caller checks first,
     # records only failures, and clears the key after a success.
     def is_blocked(self, key: str) -> bool:
@@ -137,6 +149,7 @@ async def login(
             "rate_limited",
             "Too many login attempts. Please wait a minute and try again.",
             status_code=429,
+            headers={"Retry-After": str(throttle.retry_after(f"ip:{ip}", f"email:{email}"))},
         )
     user = await provider.authenticate(db, email, password)
     if user is None:
@@ -223,6 +236,7 @@ async def change_password(
             "rate_limited",
             "Too many incorrect attempts. Please wait a minute and try again.",
             status_code=429,
+            headers={"Retry-After": str(throttle.retry_after(key))},
         )
     if not verify_password(current_password, user.password_hash):
         throttle.record(key)

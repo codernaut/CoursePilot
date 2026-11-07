@@ -22,7 +22,7 @@ from app.websearch.base import (
 from app.websearch.factory import build_web_search
 from app.websearch.tavily import TAVILY_URL, TavilySearch
 
-KEY = "tvly-secret-key-1234567890"
+KEY = "tvly-secret-key-1234"
 
 
 def row(url: str, title: str = "T", content: str = "C") -> dict[str, str]:

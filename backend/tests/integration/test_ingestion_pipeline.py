@@ -204,7 +204,8 @@ async def test_failure_inside_the_write_transaction_rolls_everything_back(
     assert sorted(r[0] for r in await vector_rows(env)) == [s for s, _ in before]
     assert await env.count("chunks_fts") == 2
     stored = await env.document(doc.id)
-    assert stored is not None and stored.status is DocumentStatus.PROCESSING  # set before the work
+    # a re-index keeps the document ready (and searchable); only the flag was set before the work
+    assert stored is not None and stored.status is DocumentStatus.READY and stored.reindexing
 
 
 # --- delete races and the delete job ------------------------------------------------------------

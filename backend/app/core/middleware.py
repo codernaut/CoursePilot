@@ -1,10 +1,12 @@
 """Request-ID middleware: reuse an incoming X-Request-ID or generate one, bind it to logs."""
 
 import re
+import time
 import uuid
 from collections.abc import Sequence
 
 import structlog
+from sqlalchemy import inspect as sa_inspect
 from starlette.exceptions import HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
@@ -130,3 +132,71 @@ class BodySizeLimitMiddleware:
             return message
 
         await self.app(scope, limited_receive, send)
+
+
+_ID_SEGMENT = re.compile(r"/[0-9a-f]{32}(?=/|$)")
+_MAX_ROUTE_CHARS = 200
+
+
+def _route_label(path: str) -> str:
+    """The request path with ids replaced by ``{id}``, so lines group by route. The query string
+    is not part of ``scope["path"]`` and is never logged."""
+    return _ID_SEGMENT.sub("/{id}", path)[:_MAX_ROUTE_CHARS]
+
+
+def _user_id(user: object) -> str | None:
+    """The user's primary key without touching the database: the ORM instance may be expired or
+    detached by the time the response is finished (a rollback expires its attributes)."""
+    if user is None:
+        return None
+    state = sa_inspect(user, raiseerr=False)
+    identity = getattr(state, "identity", None)
+    if identity:
+        return str(identity[0])
+    return None
+
+
+class AccessLogMiddleware:
+    """One structured log line per HTTP request: request id, user id (never the email), method,
+    route (ids replaced by {id}), status and latency. Query strings, headers, bodies, prompts and
+    answers are never logged. Outermost middleware, so it also sees responses produced by the
+    others.
+
+    The user id comes from ``request.state.user`` (set by authentication). For streamed responses
+    (chat) the latency is the whole stream.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started = time.perf_counter()
+        status = 500
+        request_id: str | None = None
+
+        async def capture(message: Message) -> None:
+            nonlocal status, request_id
+            if message["type"] == "http.response.start":
+                status = int(message["status"])
+                for name, value in message.get("headers", []):
+                    if name.lower() == b"x-request-id":
+                        request_id = value.decode("latin-1")
+            await send(message)
+
+        try:
+            await self.app(scope, receive, capture)
+        finally:
+            state = scope.get("state") or {}
+            user = state.get("user") if isinstance(state, dict) else getattr(state, "user", None)
+            log.info(
+                "http_request",
+                request_id=request_id,
+                user_id=_user_id(user),
+                method=scope["method"],
+                route=_route_label(scope.get("path", "")),
+                status=status,
+                latency_ms=round((time.perf_counter() - started) * 1000, 1),
+            )

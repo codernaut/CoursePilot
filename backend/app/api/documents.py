@@ -18,6 +18,7 @@ from app.schemas.documents import (
 )
 from app.services import documents, uploads
 from app.services.auth import SessionContext
+from app.services.rate_limit import SlidingWindowLimiter
 
 router = APIRouter(tags=["documents"])
 
@@ -65,6 +66,7 @@ def _upload_error(rejected: uploads.RejectedFile) -> UploadErrorOut:
     status_code=202,
     responses={
         409: {"description": "Duplicate document (nothing was accepted)"},
+        429: {"description": "Too many upload requests (Retry-After)"},
         413: {"description": "File too large"},
         415: {"description": "Unsupported or mismatching file type"},
     },
@@ -80,6 +82,8 @@ async def upload_documents(
     """Upload one or more files (multipart/form-data, file parts). Each file gets its own
     result: 202 with ``documents`` (accepted, queued for processing) and ``errors`` when at
     least one file was accepted, otherwise the first file's error status (409, 413, 415, 422)."""
+    limiter: SlidingWindowLimiter = request.app.state.upload_limiter
+    limiter.enforce(ctx.user.id, "upload")  # before any of the body is read
     declared = request.headers.get("content-length")
     result = await uploads.receive_documents(
         db,

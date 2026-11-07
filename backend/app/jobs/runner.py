@@ -12,6 +12,8 @@ import contextlib
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
+import structlog
+
 from app.core.logging import get_logger
 from app.jobs.base import ClaimedJob, FailureOutcome, JobError, JobQueue
 from app.models.enums import JobType
@@ -54,13 +56,22 @@ class JobRunner:
         job = await self._queue.claim(self.worker_id)
         if job is None:
             return False
-        log.info("job_started", job_id=job.id, type=job.type.value, attempt=job.attempts)
-        handler = self._handlers.get(job.type)
-        if handler is None:
-            await self._record_failure(job, f"No handler for job type {job.type.value}", True)
+        # Every log line of this job (including the handler task, which copies the context)
+        # carries the job id, type and document id.
+        structlog.contextvars.clear_contextvars()
+        structlog.contextvars.bind_contextvars(
+            job_id=job.id, job_type=job.type.value, document_id=job.payload.get("document_id")
+        )
+        try:
+            log.info("job_started", attempt=job.attempts)
+            handler = self._handlers.get(job.type)
+            if handler is None:
+                await self._record_failure(job, f"No handler for job type {job.type.value}", True)
+                return True
+            await self._execute(job, handler, stop, grace_s)
             return True
-        await self._execute(job, handler, stop, grace_s)
-        return True
+        finally:
+            structlog.contextvars.clear_contextvars()
 
     async def _execute(
         self, job: ClaimedJob, handler: Handler, stop: asyncio.Event, grace_s: float

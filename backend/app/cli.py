@@ -236,6 +236,8 @@ def run_start(
             port=settings.app_port,
             log_level=settings.log_level.lower(),
             proxy_headers=False,
+            access_log=False,  # replaced by our structured access log
+            log_config=None,  # keep our logging configuration (JSON, redaction)
         )
     except KeyboardInterrupt:
         pass

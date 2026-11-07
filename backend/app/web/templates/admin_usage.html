@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Usage - CoursePilot{% endblock %}
+{% block content %}
+<h1>Usage</h1>
+<p class="muted">The last {{ usage.days }} days (UTC), counted from stored messages and documents. Each user may send {{ usage.top_users[0].daily_limit if usage.top_users else daily_limit }} messages per UTC day.</p>
+
+<section aria-labelledby="overview-heading">
+  <h2 id="overview-heading">Overview</h2>
+  <ul>
+    <li>Storage used by documents: <strong>{{ usage.storage_bytes | filesize }}</strong></li>
+    <li>Documents:
+      {% for name, n in usage.documents_by_status.items() %}{{ name }} {{ n }}{% if not loop.last %}, {% endif %}{% else %}none{% endfor %}</li>
+    <li>Jobs:
+      {% for name, n in usage.jobs_by_status.items() %}{{ name }} {{ n }}{% if not loop.last %}, {% endif %}{% else %}none{% endfor %}
+      (<a href="/admin/jobs">details</a>)</li>
+    <li>Answers that used web search: <strong>{{ usage.web_answers }}</strong> of {{ usage.total_answers }}</li>
+  </ul>
+</section>
+
+<section aria-labelledby="days-heading">
+  <h2 id="days-heading">Messages per day</h2>
+  {% if usage.messages_per_day %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th scope="col">Day</th><th scope="col">Questions</th><th scope="col">Answers</th></tr></thead>
+      <tbody>
+        {% for d in usage.messages_per_day | reverse %}
+        <tr><th scope="row">{{ d.day }}</th><td>{{ d.questions }}</td><td>{{ d.answers }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<p class="muted">No messages yet.</p>{% endif %}
+</section>
+
+<section aria-labelledby="tokens-heading">
+  <h2 id="tokens-heading">Tokens per day and model</h2>
+  {% if usage.tokens_per_day %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th scope="col">Day</th><th scope="col">Provider</th><th scope="col">Model</th><th scope="col">Input</th><th scope="col">Output</th><th scope="col">Total</th></tr></thead>
+      <tbody>
+        {% for t in usage.tokens_per_day | reverse %}
+        <tr><th scope="row">{{ t.day }}</th><td>{{ t.provider }}</td><td>{{ t.model }}</td><td>{{ t.input_tokens }}</td><td>{{ t.output_tokens }}</td><td>{{ t.total_tokens }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<p class="muted">No token usage recorded yet.</p>{% endif %}
+</section>
+
+<section aria-labelledby="users-heading">
+  <h2 id="users-heading">Top users by messages</h2>
+  {% if usage.top_users %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th scope="col">User</th><th scope="col">Role</th><th scope="col">Today</th><th scope="col">Last {{ usage.days }} days</th></tr></thead>
+      <tbody>
+        {% for u in usage.top_users %}
+        <tr><th scope="row">{{ u.email }}</th><td>{{ u.role }}</td><td>{{ u.messages_today }} / {{ u.daily_limit }}</td><td>{{ u.messages_in_period }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<p class="muted">No messages yet.</p>{% endif %}
+</section>
+
+<section aria-labelledby="feedback-heading">
+  <h2 id="feedback-heading">Recent thumbs-down feedback</h2>
+  <p class="muted">Administrators see the rated answer, the question it answered and the comment, but not who rated it and not the rest of the conversation.</p>
+  {% if feedback %}
+  {% for item in feedback %}
+  <article class="card">
+    <p class="muted">{{ item.created_at.strftime("%Y-%m-%d %H:%M") }} UTC{% if item.module_path %} &middot; {{ item.module_path }}{% else %} &middot; All material{% endif %}</p>
+    <p><strong>Question:</strong> {{ item.question or "(unknown)" }}</p>
+    <p><strong>Answer:</strong> {{ item.answer }}</p>
+    {% if item.comment %}<p><strong>Comment:</strong> {{ item.comment }}</p>{% endif %}
+  </article>
+  {% endfor %}
+  {% else %}<p class="muted">No thumbs-down feedback yet.</p>{% endif %}
+</section>
+{% endblock %}

@@ -141,6 +141,12 @@ async def test_change_password_wrong_current_is_throttled_per_user(tmp_path_fact
             assert statuses == [400, 400, 400, 429]
             # Even the right password is refused while limited ...
             assert await attempt(c, csrf, TEST_PASSWORD) == 429
+            limited = await c.post(
+                CHANGE,
+                json={"current_password": "x" * 12, "new_password": "a brand new password"},
+                headers={"X-CSRF-Token": csrf},
+            )
+            assert 1 <= int(limited.headers["Retry-After"]) <= 60
             # ... and another user is not affected.
             assert await attempt(c2, csrf2, TEST_PASSWORD) == 200
     finally:

@@ -38,6 +38,7 @@ faculty → POST /api/v1/modules/{id}/documents (multipart, one or more files)
         → one transaction: documents(uploaded) + jobs(ingest_document, ids only) + audit_log → 202
         (any failure after the object was stored deletes the object again)
 delete  → documents.status=deleting (hidden) + jobs(delete_document); reindex → jobs(reindex_document)
+          (a ready document stays ready and searchable, flagged reindexing, until the new chunks replace the old)
 download → GET /api/v1/documents/{id}/download streams from Storage (inline for PDF, attachment otherwise,
           nosniff, CSP sandbox; inline PDFs get CSP default-src 'none' instead because
           Chromium's PDF viewer does not render sandboxed documents)

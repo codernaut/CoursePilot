@@ -1,5 +1,6 @@
 {% set pending = documents | selectattr("status.value", "in", ["uploaded", "processing"]) | list %}
-<div id="document-list"{% if pending %} hx-get="/modules/{{ module.id }}/materials/documents" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+{% set reindexing = documents | selectattr("reindexing") | list %}
+<div id="document-list"{% if pending or reindexing %} hx-get="/modules/{{ module.id }}/materials/documents" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
   {% if documents %}
   <div class="table-wrap">
     <table>
@@ -32,6 +33,8 @@
             {% if doc.status.value == "failed" and doc.error %}
             <div class="doc-error">{{ doc.error }}</div>
             {% elif doc.status.value == "ready" %}
+            {% if doc.reindexing %}<span class="badge badge-processing">Re-indexing&hellip;</span>{% endif %}
+            {% if doc.error and not doc.reindexing %}<div class="doc-error">The last re-index failed (the previous version is still searchable): {{ doc.error }}</div>{% endif %}
             <div class="muted file-meta">
               {%- set n = chunk_counts.get(doc.id, 0) -%}
               {{ n }} passage{{ "" if n == 1 else "s" }}
@@ -46,7 +49,7 @@
             <div class="actions">
               <a class="button button-small button-secondary" href="/api/v1/documents/{{ doc.id }}/download"><span class="visually-hidden">Download </span>{{ "Open" if doc.mime_type == "application/pdf" else "Download" }}<span class="visually-hidden"> {{ doc.title }}</span></a>
               {% if can_manage %}
-              {% if doc.status.value in ("ready", "failed") %}
+              {% if doc.status.value in ("ready", "failed") and not doc.reindexing %}
               <form method="post" action="/modules/{{ module.id }}/materials/{{ doc.id }}/reindex" class="inline-form" data-confirm="Re-index &quot;{{ doc.title }}&quot;? It will be processed again.">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button type="submit" class="button button-small button-secondary">Re-index<span class="visually-hidden"> {{ doc.title }}</span></button>

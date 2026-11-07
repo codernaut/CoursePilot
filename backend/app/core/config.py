@@ -86,6 +86,8 @@ class Settings(BaseSettings):
     upload_max_mb: int = Field(50, ge=1)
     ocr_enabled: bool = False
     chat_daily_limit_per_user: int = Field(100, ge=1)
+    chat_rate_limit_per_min: int = Field(10, ge=1)  # chat requests per user per minute (burst cap)
+    upload_rate_limit_per_min: int = Field(60, ge=1)  # upload requests per user per minute
     agent_timeout_s: int = Field(60, ge=1)
 
     # Processing worker

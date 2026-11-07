@@ -1,0 +1,47 @@
+<div id="jobs-table" hx-get="/admin/jobs/table?status={{ status_filter }}&amp;type={{ type_filter }}&amp;offset={{ page.offset }}" hx-trigger="every 5s" hx-swap="outerHTML">
+  {% if page.items %}
+  <div class="table-wrap">
+    <table>
+      <caption class="visually-hidden">Background jobs, newest first ({{ page.total }} in total)</caption>
+      <thead>
+        <tr>
+          <th scope="col">Type</th>
+          <th scope="col">Document</th>
+          <th scope="col">Status</th>
+          <th scope="col">Attempts</th>
+          <th scope="col">Updated</th>
+          <th scope="col">Last error</th>
+          <th scope="col">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for job in page.items %}
+        <tr data-job-id="{{ job.id }}" data-status="{{ job.status.value }}">
+          <th scope="row">{{ job.type.value }}</th>
+          <td>{{ job.document_title or "(gone)" }}</td>
+          <td><span class="badge badge-status badge-{{ job.status.value }}">{{ job.status.value }}</span></td>
+          <td>{{ job.attempts }} / {{ job.max_attempts }}</td>
+          <td>{{ job.updated_at.strftime("%Y-%m-%d %H:%M:%S") }} UTC</td>
+          <td>{% if job.last_error %}<div class="doc-error">{{ job.last_error }}</div>{% endif %}</td>
+          <td>
+            {% if job.status.value == "failed" %}
+            <form method="post" action="/admin/jobs/{{ job.id }}/retry" class="inline-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="button button-small button-secondary">Retry<span class="visually-hidden"> {{ job.type.value }} {{ job.document_title or "" }}</span></button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted">
+    Showing {{ page.offset + 1 }}-{{ page.offset + page.items | length }} of {{ page.total }}.
+    {% if page.offset > 0 %}<a href="/admin/jobs?status={{ status_filter }}&amp;type={{ type_filter }}&amp;offset={{ [page.offset - page.limit, 0] | max }}">Newer</a>{% endif %}
+    {% if page.offset + page.items | length < page.total %}<a href="/admin/jobs?status={{ status_filter }}&amp;type={{ type_filter }}&amp;offset={{ page.offset + page.limit }}">Older</a>{% endif %}
+  </p>
+  {% else %}
+  <p class="muted">No jobs match.</p>
+  {% endif %}
+</div>

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Jobs - CoursePilot{% endblock %}
+{% block content %}
+<h1>Background jobs</h1>
+{% if error %}<p class="alert alert-error" role="alert">{{ error }}</p>{% endif %}
+{% if notice %}<p class="alert alert-info" role="status">{{ notice }}</p>{% endif %}
+<p class="muted">Processing, re-indexing and deletion of documents. The list refreshes every few seconds. Failed jobs can be retried once their cause (for example a missing API key) is fixed.</p>
+
+<form method="get" action="/admin/jobs" class="grid-form">
+  <div>
+    <label for="job-status">Status</label>
+    <select id="job-status" name="status">
+      <option value="">all</option>
+      {% for s in statuses %}<option value="{{ s }}"{% if s == status_filter %} selected{% endif %}>{{ s }}</option>{% endfor %}
+    </select>
+  </div>
+  <div>
+    <label for="job-type">Type</label>
+    <select id="job-type" name="type">
+      <option value="">all</option>
+      {% for t in types %}<option value="{{ t }}"{% if t == type_filter %} selected{% endif %}>{{ t }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="form-actions"><button type="submit" class="button">Filter</button></div>
+</form>
+
+{% include "_jobs_table.html" %}
+{% endblock %}

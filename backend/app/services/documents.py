@@ -124,15 +124,17 @@ async def request_delete(db: AsyncSession, actor: User, document_id: str) -> Doc
 
 
 async def request_reindex(db: AsyncSession, actor: User, document_id: str) -> Document:
-    """Queue a ``reindex_document`` job. Only ``ready`` or ``failed`` documents qualify: an
-    ``uploaded``/``processing`` one already has work pending. The status goes back to
-    ``uploaded`` so the page shows (and polls) the pending work."""
+    """Queue a ``reindex_document`` job. Only ``ready`` or ``failed`` documents qualify, and a
+    ``ready`` one that is already re-indexing does not: it already has work pending.
+
+    A ``ready`` document stays ``ready`` (and searchable: its old chunks are replaced only when the
+    new ones are done) and is flagged ``reindexing``. A ``failed`` one goes back to ``uploaded`` so
+    the page shows (and polls) the pending work."""
     require_faculty(actor)
     document = await get_document(db, document_id)
-    if document.status not in (DocumentStatus.READY, DocumentStatus.FAILED):
+    if document.status not in (DocumentStatus.READY, DocumentStatus.FAILED) or document.reindexing:
         raise conflict("This document is still being processed; try again when it has finished.")
-    document.status = DocumentStatus.UPLOADED
-    document.error = None
+    _mark_reindex_pending(document)
     enqueue(db, JobType.REINDEX_DOCUMENT, {"document_id": document.id})
     audit.record(
         db,
@@ -144,3 +146,24 @@ async def request_reindex(db: AsyncSession, actor: User, document_id: str) -> Do
     )
     await db.commit()
     return document
+
+
+def _mark_reindex_pending(document: Document) -> None:
+    """Show pending (re-)processing work on the document without making it unsearchable."""
+    document.error = None
+    if document.status == DocumentStatus.READY:
+        document.reindexing = True
+    else:
+        document.status = DocumentStatus.UPLOADED
+
+
+async def mark_job_requeued(db: AsyncSession, document_id: object) -> None:
+    """An administrator re-queued a failed document job: show the pending work again (same rules
+    as ``request_reindex``). Deleting or vanished documents are left alone."""
+    if not isinstance(document_id, str):
+        return
+    document = await db.get(Document, document_id)
+    if document is None or document.status in (DocumentStatus.DELETING, DocumentStatus.PROCESSING):
+        return
+    if document.status in (DocumentStatus.READY, DocumentStatus.FAILED, DocumentStatus.UPLOADED):
+        _mark_reindex_pending(document)

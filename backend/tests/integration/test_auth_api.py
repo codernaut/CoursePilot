@@ -102,8 +102,33 @@ async def test_login_throttled_per_ip_and_per_email(tmp_path, template_db) -> No
             ]
             assert statuses[:3] == [401, 401, 401]
             assert statuses[3:] == [429, 429]  # per IP: different emails, same client address
+            limited = await client.post(
+                "/api/v1/auth/login",
+                json={"email": "zz@example.edu", "password": "wrong password!!"},
+                headers={
+                    "X-CSRF-Token": (await client.get("/api/v1/auth/csrf")).json()["csrf_token"]
+                },
+            )
+            assert limited.status_code == 429
+            assert 1 <= int(limited.headers["Retry-After"]) <= 60
     finally:
         await app.state.database.dispose()
+
+
+def test_throttle_retry_after_is_the_time_until_the_oldest_hit_expires() -> None:
+    now = [0.0]
+    throttle = LoginThrottle(2, window_s=60, clock=lambda: now[0])
+    assert throttle.allow("1.1.1.1", "x@example.edu")
+    now[0] = 20.0
+    assert throttle.allow("1.1.1.1", "x@example.edu")
+    assert not throttle.allow("1.1.1.1", "x@example.edu")
+    assert throttle.retry_after("ip:1.1.1.1", "email:x@example.edu") == 40
+    now[0] = 59.5
+    assert throttle.retry_after("ip:1.1.1.1") == 1  # never 0
+    key = "pwchange:u"
+    throttle.record(key)
+    throttle.record(key)
+    assert throttle.is_blocked(key) and throttle.retry_after(key) == 60
 
 
 def test_throttle_counts_per_email_and_expires() -> None:

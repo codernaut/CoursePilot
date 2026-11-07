@@ -63,7 +63,7 @@ def test_migration_creates_everything_on_fresh_db(fresh: Settings, tmp_path: Pat
     conn = _sqlite(tmp_path / "test.db")
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert tables >= EXPECTED_TABLES
-    assert conn.execute("SELECT version_num FROM alembic_version").fetchone() == ("0001",)
+    assert conn.execute("SELECT version_num FROM alembic_version").fetchone() == ("0002",)
     meta = dict(conn.execute("SELECT key, value FROM app_meta"))
     assert meta == {
         "embedding_provider": fresh.embedding_provider,
@@ -276,3 +276,58 @@ async def test_seed_structure_never_renames_or_deletes(app: FastAPI) -> None:
         assert (module.title, module.description) == ("Custom", "kept")
         assert len((await db.execute(select(Year))).scalars().all()) == 4
         assert len((await db.execute(select(Block))).scalars().all()) == 12
+
+
+def test_migration_0002_keeps_documents_and_chunks_in_both_directions(
+    fresh: Settings, tmp_path: Path
+) -> None:
+    """The `reindexing` column is added to (and dropped from) a table other tables point at, with
+    data in it: no document, chunk or job may be lost by the batch table rebuild."""
+    _run_in_thread(upgrade_to_head, fresh)
+    _run_in_thread(command.downgrade, alembic_config(fresh), "0001")
+    conn = _sqlite(tmp_path / "test.db")
+    now = "2026-01-01 00:00:00.000000"
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute(
+        "INSERT INTO users (id, email, password_hash, display_name, role, is_active, "
+        "must_change_password, created_at, updated_at) "
+        f"VALUES ('u', 'a@x.edu', 'h', 'A', 'faculty', 1, 0, '{now}', '{now}')"
+    )
+    conn.execute(
+        "INSERT INTO years (id, number, title, created_at, updated_at) "
+        f"VALUES ('y', 1, 'Y', '{now}', '{now}')"
+    )
+    conn.execute(
+        "INSERT INTO blocks (id, year_id, number, title, created_at, updated_at) "
+        f"VALUES ('b', 'y', 1, 'B', '{now}', '{now}')"
+    )
+    conn.execute(
+        "INSERT INTO modules (id, block_id, number, title, description, web_search_enabled, "
+        f"created_at, updated_at) VALUES ('m', 'b', 1, 'M', '', 1, '{now}', '{now}')"
+    )
+    conn.execute(
+        "INSERT INTO documents (id, module_id, uploaded_by, title, original_filename, mime_type, "
+        "size_bytes, storage_key, content_sha256, status, created_at, updated_at) VALUES "
+        f"('d', 'm', 'u', 'T', 'f.md', 'text/markdown', 1, '{'0' * 32}', 'sha', 'ready', "
+        f"'{now}', '{now}')"
+    )
+    conn.execute(
+        "INSERT INTO chunks (id, document_id, module_id, block_id, year_id, ordinal, text, "
+        "embed_text, token_count, embedding_model, metadata, created_at, updated_at) VALUES "
+        f"('c', 'd', 'm', 'b', 'y', 0, 't', 'e', 1, 'mod', '{{}}', '{now}', '{now}')"
+    )
+    conn.commit()
+    conn.close()
+
+    for step in (
+        lambda: upgrade_to_head(fresh),
+        lambda: command.downgrade(alembic_config(fresh), "0001"),
+        lambda: upgrade_to_head(fresh),
+    ):
+        _run_in_thread(step)
+        check = _sqlite(tmp_path / "test.db")
+        assert check.execute("SELECT count(*) FROM documents").fetchone() == (1,)
+        assert check.execute("SELECT count(*) FROM chunks").fetchone() == (1,)
+        check.close()
+    final = _sqlite(tmp_path / "test.db")
+    assert final.execute("SELECT reindexing FROM documents").fetchone() == (0,)

@@ -10,6 +10,9 @@ Shutdown (Ctrl+C, SIGTERM, or ``stop`` being set): the running job gets a grace 
 otherwise it is cancelled and released back to the queue. A worker that is killed outright leaves a
 ``running`` job behind, which the queue re-queues once its heartbeat is older than
 ``HEARTBEAT_STALE_S`` (a live worker refreshes it every quarter of that).
+
+Parsing runs in a separate process that is killed after ``PARSE_TIMEOUT_S`` (plus a short grace), so
+a pathological file can never hang the worker (``app.ingestion.parser_pool``).
 """
 
 import asyncio
@@ -23,9 +26,11 @@ from collections.abc import Callable
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
 from app.core.startup import warn_if_insecure_http
+from app.core.tracing import apply_tracing_policy
 from app.db.session import Database
 from app.ingestion.embedder import Embedder, get_embedder
 from app.ingestion.handlers import build_failure_hook, build_handlers, build_release_hook
+from app.ingestion.parser_pool import ParserPool
 from app.ingestion.pipeline import PipelineDeps
 from app.jobs import JobRunner, SqliteJobQueue
 from app.services import audit, auth
@@ -82,10 +87,12 @@ async def run_worker(
     embedder_factory: Callable[[], Embedder] | None = None,
     storage: Storage | None = None,
     shutdown_grace_s: float = SHUTDOWN_GRACE_S,
+    isolate_parsing: bool = True,
 ) -> None:
     """Run until ``stop`` is set. Returns promptly when it is."""
     database = Database(settings.database_url)
     warn_if_insecure_http(settings)
+    apply_tracing_policy(settings)
     storage = storage or get_storage(settings)
     poll = poll_interval_s if poll_interval_s is not None else settings.worker_poll_interval_s
     worker_id = make_worker_id()
@@ -94,6 +101,8 @@ async def run_worker(
         storage=storage,
         settings=settings,
         embedder_factory=embedder_factory or (lambda: get_embedder(settings)),
+        # Parsing runs in a child process that is killed when it hangs (parser_pool.py).
+        parser_pool=ParserPool() if isolate_parsing else None,
     )
     queue = SqliteJobQueue(database, lock_timeout_s=stale_after_s(settings))
     runner = JobRunner(
@@ -143,6 +152,8 @@ async def run_worker(
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(stop.wait(), timeout=min(poll, interval_s))
     finally:
+        if deps.parser_pool is not None:
+            await deps.parser_pool.aclose()
         await database.dispose()
         log.info("worker_stopped")
 

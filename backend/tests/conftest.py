@@ -41,6 +41,8 @@ def make_settings(tmp_path: Path, **overrides: object) -> Settings:
         "database_url": f"sqlite+aiosqlite:///{tmp_path / 'test.db'}",
         "checkpoint_db_path": str(tmp_path / "checkpoints.db"),
         "login_rate_limit_per_min": 50,
+        "chat_rate_limit_per_min": 1000,
+        "upload_rate_limit_per_min": 1000,
     }
     values.update(overrides)
     return Settings(_env_file=None, **values)  # type: ignore[arg-type]

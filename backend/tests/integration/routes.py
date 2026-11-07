@@ -71,6 +71,12 @@ def route_table(ids: dict[str, str]) -> list[Route]:
             {"feedback": "up"},
             expected=(401, 404, 404, 404),
         ),
+        # Administrator operations (admin only; a retry of an unknown job is 404 for the admin).
+        Route("GET", f"{api}/admin/jobs", expected=(401, 403, 403, 200)),
+        Route("GET", f"{api}/admin/jobs?status=failed&limit=5", expected=(401, 403, 403, 200)),
+        Route("POST", f"{api}/admin/jobs/{'0' * 32}/retry", expected=(401, 403, 403, 404)),
+        Route("GET", f"{api}/admin/usage", expected=(401, 403, 403, 200)),
+        Route("GET", f"{api}/admin/feedback", expected=(401, 403, 403, 200)),
         Route("GET", f"{api}/auth/me", expected=(401, 200, 200, 200)),
         Route("GET", f"{api}/openapi.json", expected=(401, 200, 200, 200)),
         # HTML pages (anonymous users are redirected to /login)
@@ -98,6 +104,15 @@ def route_table(ids: dict[str, str]) -> list[Route]:
         ),
         Route("GET", "/docs", expected=(anon_page, 200, 200, 200)),
         Route("GET", "/admin/users", expected=(anon_page, 403, 403, 200)),
+        Route("GET", "/admin/jobs", expected=(anon_page, 403, 403, 200)),
+        Route("GET", "/admin/jobs/table", expected=(anon_page, 403, 403, 200)),
+        Route("GET", "/admin/usage", expected=(anon_page, 403, 403, 200)),
+        Route(
+            "POST",
+            f"/admin/jobs/{'0' * 32}/retry",
+            form=True,
+            expected=(anon_page, 403, 403, 404),
+        ),
         Route(
             "POST",
             "/admin/users",
