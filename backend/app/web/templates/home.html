@@ -1,26 +1,45 @@
 {% extends "base.html" %}
 {% block title %}Home - CoursePilot{% endblock %}
 {% block content %}
-<h1>Welcome, {{ user.display_name }}</h1>
+<div class="page-head">
+  <div>
+    <span class="tag">Your programme</span>
+    <h1>Welcome, {{ user.display_name }}</h1>
+    <p class="muted">Pick a module to read its material or to ask the assistant about it.</p>
+  </div>
+  <a class="button button-amber" href="/chat"><svg class="i"><use href="#chat"/></svg> Start a chat</a>
+</div>
 {% if password_changed %}<p class="alert alert-info" role="status">Your password was changed.</p>{% endif %}
-<p class="muted">Programme modules. Open a module's materials to see (or, for faculty, upload) its documents. Chat arrives in a later milestone.</p>
 {% for year in years %}
-<section class="tree-year" aria-labelledby="year-{{ year.id }}">
-  <h2 id="year-{{ year.id }}">{{ year.title }}</h2>
+<details class="tree-year" id="year-{{ year.id }}"{% if loop.first %} open{% endif %}>
+  <summary><h2 id="year-title-{{ year.id }}">{{ year.title }}</h2></summary>
+  <div class="tree-body">
   {% for block in year.blocks %}
-  <h3>{{ block.title }}</h3>
-  <ul class="modules">
-    {% for module in block.modules %}
-    <li>
-      <strong>{{ module.title }}</strong>
-      {% if module.description %}<span class="muted"> - {{ module.description }}</span>{% endif %}
-      <a href="/modules/{{ module.id }}/materials">Materials<span class="visually-hidden"> for {{ module.title }}</span></a>
-    </li>
-    {% endfor %}
-  </ul>
+  <details class="tree-block" open>
+    <summary><h3>{{ block.title }}</h3></summary>
+    <ul class="modules">
+      {% for module in block.modules %}
+      <li>
+        <div class="module-card">
+          <strong>{{ module.title }}</strong>
+          {% if module.description %}<span class="muted">{{ module.description }}</span>{% endif %}
+          <div class="module-links">
+            <a href="/modules/{{ module.id }}/materials">Materials<span class="visually-hidden"> for {{ module.title }}</span></a>
+            <a href="/chat?module_id={{ module.id }}">Ask in chat<span class="visually-hidden"> about {{ module.title }}</span></a>
+          </div>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+  </details>
   {% endfor %}
-</section>
+  </div>
+</details>
 {% else %}
-<p>No programme structure yet. An administrator can run <code>python -m app.cli seed-structure</code>.</p>
+<div class="empty">
+  <svg class="i"><use href="#folder"/></svg>
+  <p class="empty-title">No programme structure yet</p>
+  <p>An administrator can run <code>python -m app.cli seed-structure</code>.</p>
+</div>
 {% endfor %}
 {% endblock %}

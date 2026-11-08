@@ -3,14 +3,22 @@
 {% block content %}
 {% set is_admin = user.role.value == "admin" %}
 {% set can_edit_modules = user.role.value in ("admin", "faculty") %}
-<h1>Programme structure</h1>
+<div class="page-head">
+  <div>
+    <span class="tag">Programme</span>
+    <h1>Programme structure</h1>
+    <p class="muted">
+      {% if is_admin %}Administrators can rename years, blocks and modules.{% elif can_edit_modules %}Faculty can rename modules and edit their descriptions.{% else %}The programme is organised into years, blocks and modules.{% endif %}
+    </p>
+  </div>
+</div>
 {% if saved %}<p class="alert alert-info" role="status">Saved.</p>{% endif %}
 {% if error %}<p class="alert alert-error" role="alert">{{ error }}</p>{% endif %}
-<p class="muted">
-  {% if is_admin %}Administrators can rename years, blocks and modules.{% elif can_edit_modules %}Faculty can rename modules and edit their descriptions.{% else %}The programme is organised into years, blocks and modules.{% endif %}
-</p>
+<div class="structure">
 {% for year in years %}
-<section class="tree-year" id="year-{{ year.id }}" aria-labelledby="year-title-{{ year.id }}">
+<details class="tree-year" id="year-{{ year.id }}" open>
+  <summary><h2 id="year-title-{{ year.id }}">{{ year.title }}</h2></summary>
+  <div class="tree-body">
   {% if is_admin %}
   <form method="post" action="/structure/years/{{ year.id }}" class="inline-form heading-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -19,9 +27,9 @@
     <button type="submit" class="button button-small">Rename</button>
   </form>
   {% endif %}
-  <h2 id="year-title-{{ year.id }}">{{ year.title }}</h2>
   {% for block in year.blocks %}
-  <div class="tree-block" id="block-{{ block.id }}">
+  <details class="tree-block" id="block-{{ block.id }}" open>
+    <summary><h3>{{ block.title }}</h3></summary>
     {% if is_admin %}
     <form method="post" action="/structure/blocks/{{ block.id }}" class="inline-form heading-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -30,7 +38,6 @@
       <button type="submit" class="button button-small">Rename</button>
     </form>
     {% endif %}
-    <h3>{{ block.title }}</h3>
     <ul class="modules">
       {% for module in block.modules %}
       <li id="module-{{ module.id }}">
@@ -45,16 +52,24 @@
           <button type="submit" class="button button-small">Save module</button>
         </form>
         {% else %}
-        <strong>{{ module.title }}</strong>
-        {% if module.description %}<span class="muted"> - {{ module.description }}</span>{% endif %}
+        <div class="module-card">
+          <strong>{{ module.title }}</strong>
+          {% if module.description %}<span class="muted">{{ module.description }}</span>{% endif %}
+        </div>
         {% endif %}
       </li>
       {% endfor %}
     </ul>
-  </div>
+  </details>
   {% endfor %}
-</section>
+  </div>
+</details>
 {% else %}
-<p>No programme structure yet. Run <code>python -m app.cli seed-structure</code>.</p>
+<div class="empty">
+  <svg class="i"><use href="#folder"/></svg>
+  <p class="empty-title">No programme structure yet</p>
+  <p>Run <code>python -m app.cli seed-structure</code>.</p>
+</div>
 {% endfor %}
+</div>
 {% endblock %}

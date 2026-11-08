@@ -1,12 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Jobs - CoursePilot{% endblock %}
 {% block content %}
-<h1>Background jobs</h1>
+<div class="page-head">
+  <div>
+    <span class="tag">Administration</span>
+    <h1>Background jobs</h1>
+  </div>
+</div>
 {% if error %}<p class="alert alert-error" role="alert">{{ error }}</p>{% endif %}
 {% if notice %}<p class="alert alert-info" role="status">{{ notice }}</p>{% endif %}
 <p class="muted">Processing, re-indexing and deletion of documents. The list refreshes every few seconds. Failed jobs can be retried once their cause (for example a missing API key) is fixed.</p>
 
-<form method="get" action="/admin/jobs" class="grid-form">
+<form method="get" action="/admin/jobs" class="grid-form card">
   <div>
     <label for="job-status">Status</label>
     <select id="job-status" name="status">

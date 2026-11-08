@@ -43,6 +43,18 @@
 
   function setStatus(message) { statusEl.textContent = message; }
 
+  /* A decorative icon from the sprite in _icons.html (built as DOM nodes, never parsed markup). */
+  function icon(name) {
+    var ns = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("class", "i");
+    svg.setAttribute("aria-hidden", "true");
+    var use = document.createElementNS(ns, "use");
+    use.setAttribute("href", "#" + name);
+    svg.appendChild(use);
+    return svg;
+  }
+
   function showProviderError(message) {
     if (!providerAlert) { return; }
     providerAlert.textContent = message;
@@ -137,7 +149,10 @@
       var webBox = el("div", "message-sources message-web");
       webBox.setAttribute("role", "group");
       webBox.setAttribute("aria-label", "From the web");
-      webBox.appendChild(el("p", "message-sources-title", "From the web"));
+      var webTitle = el("p", "message-sources-title");
+      webTitle.appendChild(icon("globe"));
+      webTitle.appendChild(document.createTextNode("From the web"));
+      webBox.appendChild(webTitle);
       webBox.appendChild(el("p", "muted", "The course material did not cover this. These sources are not part of it."));
       var webList = el("ul", "source-list");
       web.forEach(function (c) {
@@ -165,8 +180,10 @@
     var group = el("div", "feedback");
     group.setAttribute("role", "group");
     group.setAttribute("aria-label", "Rate this answer");
-    [["up", "Helpful"], ["down", "Not helpful"]].forEach(function (pair) {
-      var button = el("button", "button button-small button-secondary", pair[1]);
+    [["up", "Helpful", "thumbup"], ["down", "Not helpful", "thumbdown"]].forEach(function (pair) {
+      var button = el("button", "button button-small button-secondary");
+      button.appendChild(icon(pair[2]));
+      button.appendChild(document.createTextNode(" " + pair[1]));
       button.type = "button";
       button.setAttribute("aria-pressed", state === pair[0] ? "true" : "false");
       button.addEventListener("click", function () {

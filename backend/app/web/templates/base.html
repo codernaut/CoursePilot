@@ -1,47 +1,62 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-accent="crimson">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <meta name="htmx-config" content='{"allowEval": false, "includeIndicatorStyles": false}'>
   {% if csrf_token %}<meta name="csrf-token" content="{{ csrf_token }}">{% endif %}
   <title>{% block title %}CoursePilot{% endblock %}</title>
   <link rel="stylesheet" href="/static/css/app.css">
+  <script src="/static/js/theme.js"></script>
   <script src="/static/htmx.min.js" defer></script>
 </head>
-<body{% if user and csrf_token %} hx-headers='{{ {"X-CSRF-Token": csrf_token} | tojson }}'{% endif %}>
+<body class="{% block body_class %}{% endblock %}"{% if user and csrf_token %} hx-headers='{{ {"X-CSRF-Token": csrf_token} | tojson }}'{% endif %}>
+  {% include "_icons.html" %}
   <a class="skip-link" href="#main">Skip to content</a>
-  <header class="site-header">
-    <a class="brand" href="/">CoursePilot</a>
+  <header class="topbar site-header">
+    <a class="brand" href="/"><span class="logo" aria-hidden="true"></span>CoursePilot</a>
     {% if user %}
-    <nav aria-label="Main">
-      <ul class="nav">
-        <li><a href="/"{% if request.url.path == "/" %} aria-current="page"{% endif %}>Home</a></li>
-        <li><a href="/chat"{% if request.url.path == "/chat" or request.url.path.startswith("/chat/") %} aria-current="page"{% endif %}>Chat</a></li>
-        <li><a href="/search"{% if request.url.path == "/search" %} aria-current="page"{% endif %}>Search</a></li>
-        <li><a href="/materials"{% if request.url.path == "/materials" or request.url.path.endswith("/materials") %} aria-current="page"{% endif %}>Materials</a></li>
-        <li><a href="/structure"{% if request.url.path == "/structure" %} aria-current="page"{% endif %}>Programme</a></li>
-        {% if user.role.value == "admin" %}
-        <li><a href="/admin/users"{% if request.url.path == "/admin/users" %} aria-current="page"{% endif %}>Users</a></li>
-        <li><a href="/admin/jobs"{% if request.url.path.startswith("/admin/jobs") %} aria-current="page"{% endif %}>Jobs</a></li>
-        <li><a href="/admin/usage"{% if request.url.path == "/admin/usage" %} aria-current="page"{% endif %}>Usage</a></li>
-        {% endif %}
-        <li><a href="/change-password">Change password</a></li>
-      </ul>
-    </nav>
-    <div class="account">
-      <span class="who">{{ user.display_name }} <span class="badge">{{ user.role.value }}</span></span>
-      <form method="post" action="/logout">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <button type="submit" class="link-button">Log out</button>
-      </form>
+    <button type="button" class="icon-btn menu-btn" data-menu-toggle aria-expanded="false" aria-controls="site-menu" aria-label="Menu"><svg class="i"><use href="#menu"/></svg></button>
+    <div id="site-menu" class="topbar-menu">
+      <nav class="nav" aria-label="Main">
+        <ul>
+          <li><a href="/"{% if request.url.path == "/" %} aria-current="page"{% endif %}>Home</a></li>
+          <li><a href="/chat"{% if request.url.path == "/chat" or request.url.path.startswith("/chat/") %} aria-current="page"{% endif %}>Chat</a></li>
+          <li><a href="/search"{% if request.url.path == "/search" %} aria-current="page"{% endif %}>Search</a></li>
+          <li><a href="/materials"{% if request.url.path == "/materials" or request.url.path.endswith("/materials") %} aria-current="page"{% endif %}>Materials</a></li>
+          <li><a href="/structure"{% if request.url.path == "/structure" %} aria-current="page"{% endif %}>Programme</a></li>
+          {% if user.role.value == "admin" %}
+          <li><a href="/admin/users"{% if request.url.path == "/admin/users" %} aria-current="page"{% endif %}>Users</a></li>
+          <li><a href="/admin/jobs"{% if request.url.path.startswith("/admin/jobs") %} aria-current="page"{% endif %}>Jobs</a></li>
+          <li><a href="/admin/usage"{% if request.url.path == "/admin/usage" %} aria-current="page"{% endif %}>Usage</a></li>
+          {% endif %}
+        </ul>
+      </nav>
+      {% include "_theme_controls.html" %}
     </div>
+    {% else %}
+    {% include "_theme_controls.html" %}
+    {% endif %}
+    <button type="button" class="icon-btn theme-toggle" data-theme-toggle aria-pressed="false" aria-label="Dark theme"><svg class="i sun"><use href="#sun"/></svg><svg class="i moon"><use href="#moon"/></svg></button>
+    {% if user %}
+    <details class="usermenu">
+      <summary aria-label="Account menu"><span class="avatar" aria-hidden="true">{{ ((user.display_name.split() | map("first") | join)[:2] | upper) or "?" }}</span><span class="user-name">{{ user.display_name }}</span></summary>
+      <div class="usermenu-panel">
+        <p class="who"><strong>{{ user.display_name }}</strong> <span class="badge">{{ user.role.value }}</span></p>
+        <p><a href="/change-password">Change password</a></p>
+        <form method="post" action="/logout">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="link-button">Log out</button>
+        </form>
+      </div>
+    </details>
     {% endif %}
   </header>
   {% if insecure_http and user and user.role.value == "admin" %}
   <div class="banner banner-warning" role="alert">Traffic to this server is not encrypted (ALLOW_INSECURE_HTTP=true).</div>
   {% endif %}
-  <main id="main" class="container">
+  <main id="main" class="container{% block main_class %}{% endblock %}">
     {% block content %}{% endblock %}
   </main>
   <footer class="site-footer"><small>{{ version_label }}</small></footer>

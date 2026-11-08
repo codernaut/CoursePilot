@@ -1,8 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Search - CoursePilot{% endblock %}
 {% block content %}
-<h1>Search the material</h1>
-<p class="muted">Searches the uploaded material of the whole programme. Every signed-in user can read all of it.</p>
+<div class="page-head">
+  <div>
+    <span class="tag">Search</span>
+    <h1>Search the material</h1>
+    <p class="muted">Searches the uploaded material of the whole programme. Every signed-in user can read all of it.</p>
+  </div>
+</div>
 <form method="get" action="/search" class="search-form">
   <div class="field">
     <label for="search-q">Question or keywords</label>
@@ -38,7 +43,7 @@
     </div>
     <label class="checkbox" for="search-widen"><input id="search-widen" type="checkbox" name="widen" value="1"{% if widen %} checked{% endif %}> Widen automatically (module, then block, then all)</label>
   </div>
-  <button type="submit" class="button">Search</button>
+  <button type="submit" class="button"><svg class="i"><use href="#search"/></svg> Search</button>
 </form>
 
 {% if error %}
@@ -47,7 +52,7 @@
 <section aria-labelledby="results-heading" class="results">
   <h2 id="results-heading">Results</h2>
   {% for tier in tiers %}
-  <p class="muted">Searched {% if tier.scope.level == "module" %}the module{% elif tier.scope.level == "block" %}the block{% else %}all material{% endif %}: {{ tier.chunks | length }} passage{{ "" if tier.chunks | length == 1 else "s" }}{% if not tier.sufficient and not loop.last %}, widening the search{% endif %}.</p>
+  <p class="muted tier-note">Searched {% if tier.scope.level == "module" %}the module{% elif tier.scope.level == "block" %}the block{% else %}all material{% endif %}: {{ tier.chunks | length }} passage{{ "" if tier.chunks | length == 1 else "s" }}{% if not tier.sufficient and not loop.last %}, widening the search{% endif %}.</p>
   {% endfor %}
   {% if hits %}
   <ol class="hit-list">
@@ -61,7 +66,11 @@
     {% endfor %}
   </ol>
   {% else %}
-  <p>No matching passages were found.</p>
+  <div class="empty">
+    <svg class="i"><use href="#search"/></svg>
+    <p class="empty-title">No matching passages were found.</p>
+    <p>Try other words, a wider scope or turn on automatic widening.</p>
+  </div>
   {% endif %}
 </section>
 {% endif %}

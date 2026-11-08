@@ -1,31 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Chat - CoursePilot{% endblock %}
+{% block main_class %} container-wide{% endblock %}
 {% block content %}
-<h1>Chat</h1>
+<h1 class="visually-hidden">Chat</h1>
 <div id="chat-app" class="chat-layout"
      data-conversation-id="{{ current.conversation.id if current else '' }}"
      data-max-chars="{{ max_chars }}"
      data-provider-ok="{{ 'false' if provider_message else 'true' }}">
   <aside class="chat-sidebar" aria-label="Your conversations">
-    <a class="button button-small" href="/chat">New chat</a>
-    <ul id="conversation-list" class="conversation-list">
-      {% for view in conversations %}
-      <li class="conversation-item{% if current and current.conversation.id == view.conversation.id %} is-current{% endif %}" data-conversation-id="{{ view.conversation.id }}">
-        <a href="/chat/{{ view.conversation.id }}"{% if current and current.conversation.id == view.conversation.id %} aria-current="page"{% endif %}>
-          <span class="conversation-title">{{ view.conversation.title }}</span>
-          <span class="muted conversation-scope">{{ view.module_path or "All material" }}</span>
-        </a>
-        <button type="button" class="link-button conversation-delete" data-delete-conversation="{{ view.conversation.id }}" aria-label="Delete conversation: {{ view.conversation.title }}">Delete</button>
-      </li>
-      {% endfor %}
-    </ul>
-    <p id="conversation-empty" class="muted"{% if conversations %} hidden{% endif %}>No conversations yet.</p>
-  </aside>
-
-  <section class="chat-main" aria-labelledby="chat-heading">
-    <h2 id="chat-heading" class="visually-hidden">Conversation</h2>
     <div class="field chat-scope">
-      <label for="chat-module">Ask about</label>
+      <p class="eyebrow">Pick a module</p>
+      <label for="chat-module" class="visually-hidden">Ask about</label>
       <select id="chat-module"{% if current %} disabled{% endif %}>
         <option value="">All material</option>
         {% for year in years %}
@@ -40,6 +25,27 @@
       </select>
       {% if current %}<p class="muted">This conversation is about {{ current.module_path or "all material" }}.</p>{% endif %}
     </div>
+
+    <div class="chat-convs">
+      <p class="eyebrow">Your conversations</p>
+      <a class="button button-amber button-block" href="/chat">+ New chat</a>
+      <ul id="conversation-list" class="conversation-list">
+        {% for view in conversations %}
+        <li class="conversation-item{% if current and current.conversation.id == view.conversation.id %} is-current{% endif %}" data-conversation-id="{{ view.conversation.id }}">
+          <a href="/chat/{{ view.conversation.id }}"{% if current and current.conversation.id == view.conversation.id %} aria-current="page"{% endif %}>
+            <span class="conversation-title">{{ view.conversation.title }}</span>
+            <span class="muted conversation-scope">{{ view.module_path or "All material" }}</span>
+          </a>
+          <button type="button" class="link-button conversation-delete" data-delete-conversation="{{ view.conversation.id }}" aria-label="Delete conversation: {{ view.conversation.title }}">Delete</button>
+        </li>
+        {% endfor %}
+      </ul>
+      <p id="conversation-empty" class="muted"{% if conversations %} hidden{% endif %}>No conversations yet.</p>
+    </div>
+  </aside>
+
+  <section class="chat-main" aria-labelledby="chat-heading">
+    <h2 id="chat-heading" class="visually-hidden">Conversation</h2>
 
     {% if provider_message %}
     <p id="provider-alert" class="alert alert-error" role="alert">{{ provider_message }}</p>
@@ -58,16 +64,21 @@
       </li>
       {% endfor %}
     </ol>
+    <div class="chat-welcome">
+      <svg class="i"><use href="#chat"/></svg>
+      <p class="empty-title">What would you like to understand?</p>
+      <p>Answers come from the uploaded material and cite their sources.</p>
+    </div>
 
     <div id="chat-status" class="chat-status muted" role="status" aria-live="polite"></div>
 
     <form id="chat-form" class="chat-form" autocomplete="off">
-      <label for="chat-input">Your question</label>
-      <textarea id="chat-input" rows="3" maxlength="{{ max_chars }}" required{% if provider_message %} disabled{% endif %}></textarea>
+      <label for="chat-input" class="visually-hidden">Your question</label>
+      <textarea id="chat-input" rows="2" maxlength="{{ max_chars }}" placeholder="Ask about the material&hellip;" required{% if provider_message %} disabled{% endif %}></textarea>
       <div class="chat-actions">
-        <button type="submit" id="chat-send" class="button"{% if provider_message %} disabled{% endif %}>Send</button>
+        <span class="muted">Enter sends, Shift+Enter adds a line.</span>
         <button type="button" id="chat-stop" class="button button-secondary" hidden>Stop</button>
-        <span class="muted">Answers come from the uploaded material and cite their sources.</span>
+        <button type="submit" id="chat-send" class="button"{% if provider_message %} disabled{% endif %}>Send <svg class="i"><use href="#send"/></svg></button>
       </div>
     </form>
   </section>

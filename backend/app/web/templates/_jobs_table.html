@@ -42,6 +42,10 @@
     {% if page.offset + page.items | length < page.total %}<a href="/admin/jobs?status={{ status_filter }}&amp;type={{ type_filter }}&amp;offset={{ page.offset + page.limit }}">Older</a>{% endif %}
   </p>
   {% else %}
-  <p class="muted">No jobs match.</p>
+  <div class="empty">
+    <svg class="i"><use href="#inbox"/></svg>
+    <p class="empty-title">No jobs match.</p>
+    <p>Uploads, re-indexing and deletions show up here.</p>
+  </div>
   {% endif %}
 </div>

@@ -1,7 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Log in - CoursePilot{% endblock %}
+{% block body_class %}page-login{% endblock %}
 {% block content %}
-<section class="card narrow">
+<div class="login-wrap">
+<section class="login-card" aria-label="Log in">
+  <span class="logo" aria-hidden="true"></span>
+  <p class="brand-title">CoursePilot</p>
+  <p class="tagline">Ask your course material. Get answers you can cite.</p>
   <h1>Log in</h1>
   {% if error %}<p class="alert alert-error" role="alert">{{ error }}</p>{% endif %}
   <form method="post" action="/login" class="stack">
@@ -14,4 +19,5 @@
   </form>
   <p class="muted">Accounts are created by an administrator. Ask your administrator if you need access.</p>
 </section>
+</div>
 {% endblock %}

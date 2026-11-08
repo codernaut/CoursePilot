@@ -1,7 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Users - CoursePilot{% endblock %}
 {% block content %}
-<h1>Users</h1>
+<div class="page-head">
+  <div>
+    <span class="tag">Administration</span>
+    <h1>Users</h1>
+    <p class="muted">Accounts are created here; there is no self-registration.</p>
+  </div>
+</div>
 {% if error %}<p class="alert alert-error" role="alert">{{ error }}</p>{% endif %}
 {% if notice %}<p class="alert alert-info" role="status">{{ notice }}</p>{% endif %}
 {% if temporary %}
@@ -63,8 +69,8 @@
               <button type="submit" class="button button-small">Set</button>
             </form>
           </td>
-          <td>{% if u.is_active %}Active{% else %}<span class="badge badge-off">Inactive</span>{% endif %}{% if u.must_change_password %} <span class="badge">must change password</span>{% endif %}</td>
-          <td class="actions">
+          <td>{% if u.is_active %}<span class="badge badge-ready">Active</span>{% else %}<span class="badge badge-off">Inactive</span>{% endif %}{% if u.must_change_password %} <span class="badge">must change password</span>{% endif %}</td>
+          <td><div class="actions">
             <form method="post" action="/admin/users/{{ u.id }}/active" class="inline-form">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               {% if u.is_active %}
@@ -79,7 +85,7 @@
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <button type="submit" class="button button-small button-secondary">Reset password<span class="visually-hidden"> for {{ u.email }}</span></button>
             </form>
-          </td>
+          </div></td>
         </tr>
         {% endfor %}
       </tbody>

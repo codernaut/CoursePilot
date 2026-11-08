@@ -4,15 +4,18 @@
 <div id="passage-backdrop" class="panel-backdrop" hidden></div>
 <aside id="passage-panel" class="passage-panel" role="dialog" aria-modal="true"
        aria-labelledby="passage-title" tabindex="-1" hidden>
+  <div class="grab" aria-hidden="true"></div>
   <div class="panel-header">
     <h2 id="passage-title">Passage</h2>
-    <button type="button" id="passage-close" class="button button-small button-secondary">Close</button>
+    <button type="button" id="passage-close" class="button button-small button-secondary"><svg class="i"><use href="#x"/></svg> Close</button>
   </div>
-  <p id="passage-status" class="muted" role="status" aria-live="polite"></p>
-  <div id="passage-body" hidden>
-    <p id="passage-path" class="passage-path"></p>
-    <p id="passage-location" class="muted"></p>
-    <blockquote id="passage-text" class="passage-text"></blockquote>
-    <p><a id="passage-link" href="#" target="_blank" rel="noopener noreferrer">Open document</a></p>
+  <div class="panel-content">
+    <p id="passage-status" class="muted" role="status" aria-live="polite"></p>
+    <div id="passage-body" hidden>
+      <p id="passage-path" class="passage-path"></p>
+      <p id="passage-location" class="muted"></p>
+      <blockquote id="passage-text" class="passage-text"></blockquote>
+      <p><a id="passage-link" href="#" target="_blank" rel="noopener noreferrer">Open document</a></p>
+    </div>
   </div>
 </aside>

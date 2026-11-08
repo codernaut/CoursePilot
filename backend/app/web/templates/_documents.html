@@ -2,72 +2,61 @@
 {% set reindexing = documents | selectattr("reindexing") | list %}
 <div id="document-list"{% if pending or reindexing %} hx-get="/modules/{{ module.id }}/materials/documents" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
   {% if documents %}
-  <div class="table-wrap">
-    <table>
-      <caption class="visually-hidden">Documents in {{ module.title }}</caption>
-      <thead>
-        <tr>
-          <th scope="col">Title</th>
-          <th scope="col">Status</th>
-          <th scope="col">Size</th>
-          <th scope="col">Week</th>
-          <th scope="col">Uploaded</th>
-          <th scope="col">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for doc in documents %}
-        <tr data-doc-id="{{ doc.id }}" data-status="{{ doc.status.value }}" data-title="{{ doc.title }}">
-          <th scope="row">
-            {{ doc.title }}
-            <div class="muted file-meta">{{ doc.original_filename }}</div>
-          </th>
-          <td>
-            <span class="badge badge-status badge-{{ doc.status.value }}">
-              {%- if doc.status.value == "uploaded" %}Queued
-              {%- elif doc.status.value == "processing" %}Processing
-              {%- elif doc.status.value == "ready" %}Ready
-              {%- elif doc.status.value == "failed" %}Failed
-              {%- else %}{{ doc.status.value }}{% endif -%}
-            </span>
-            {% if doc.status.value == "failed" and doc.error %}
-            <div class="doc-error">{{ doc.error }}</div>
-            {% elif doc.status.value == "ready" %}
-            {% if doc.reindexing %}<span class="badge badge-processing">Re-indexing&hellip;</span>{% endif %}
-            {% if doc.error and not doc.reindexing %}<div class="doc-error">The last re-index failed (the previous version is still searchable): {{ doc.error }}</div>{% endif %}
-            <div class="muted file-meta">
-              {%- set n = chunk_counts.get(doc.id, 0) -%}
-              {{ n }} passage{{ "" if n == 1 else "s" }}
-              {%- if doc.page_count %}, {{ doc.page_count }} {{ "slide" if doc.mime_type.endswith("presentation") else "page" }}{{ "" if doc.page_count == 1 else "s" }}{% endif -%}
-            </div>
-            {% endif %}
-          </td>
-          <td>{{ doc.size_bytes | filesize }}</td>
-          <td>{{ doc.week or "" }}</td>
-          <td>{{ doc.created_at.strftime("%Y-%m-%d %H:%M") }} UTC</td>
-          <td>
-            <div class="actions">
-              <a class="button button-small button-secondary" href="/api/v1/documents/{{ doc.id }}/download"><span class="visually-hidden">Download </span>{{ "Open" if doc.mime_type == "application/pdf" else "Download" }}<span class="visually-hidden"> {{ doc.title }}</span></a>
-              {% if can_manage %}
-              {% if doc.status.value in ("ready", "failed") and not doc.reindexing %}
-              <form method="post" action="/modules/{{ module.id }}/materials/{{ doc.id }}/reindex" class="inline-form" data-confirm="Re-index &quot;{{ doc.title }}&quot;? It will be processed again.">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <button type="submit" class="button button-small button-secondary">Re-index<span class="visually-hidden"> {{ doc.title }}</span></button>
-              </form>
-              {% endif %}
-              <form method="post" action="/modules/{{ module.id }}/materials/{{ doc.id }}/delete" class="inline-form" data-confirm="Delete &quot;{{ doc.title }}&quot;? This cannot be undone.">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <button type="submit" class="button button-small button-danger">Delete<span class="visually-hidden"> {{ doc.title }}</span></button>
-              </form>
-              {% endif %}
-            </div>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  <ul class="docs" aria-label="Documents in {{ module.title }}">
+    {% for doc in documents %}
+    {% set ext = doc.original_filename.rsplit(".", 1)[-1] | lower %}
+    <li class="doc" data-doc-id="{{ doc.id }}" data-status="{{ doc.status.value }}" data-title="{{ doc.title }}">
+      <span class="ft{% if ext in ('pdf', 'pptx', 'docx', 'md', 'txt', 'html') %} ft-{{ ext }}{% endif %}" aria-hidden="true">{{ ext[:4] | upper }}</span>
+      <div class="doc-info">
+        <h3 class="doc-title">{{ doc.title }}</h3>
+        <div class="muted file-meta">{{ doc.original_filename }} &middot; {{ doc.size_bytes | filesize }}{% if doc.week %} &middot; {{ doc.week }}{% endif %} &middot; {{ doc.created_at.strftime("%Y-%m-%d %H:%M") }} UTC</div>
+        {% if doc.status.value == "failed" and doc.error %}
+        <div class="doc-error">{{ doc.error }}</div>
+        {% elif doc.status.value == "ready" %}
+        {% if doc.error and not doc.reindexing %}<div class="doc-error">The last re-index failed (the previous version is still searchable): {{ doc.error }}</div>{% endif %}
+        {% endif %}
+      </div>
+      <div class="doc-status">
+        <span class="badge badge-status badge-{{ doc.status.value }}">
+          {%- if doc.status.value == "uploaded" %}Queued
+          {%- elif doc.status.value == "processing" %}Processing
+          {%- elif doc.status.value == "ready" %}Ready
+          {%- elif doc.status.value == "failed" %}Failed
+          {%- else %}{{ doc.status.value }}{% endif -%}
+        </span>
+        {% if doc.status.value in ("uploaded", "processing") %}<span class="bar" aria-hidden="true"><i></i></span>{% endif %}
+        {% if doc.status.value == "ready" %}
+        {% if doc.reindexing %}<span class="badge badge-processing">Re-indexing&hellip;</span>{% endif %}
+        <span class="muted file-meta">
+          {%- set n = chunk_counts.get(doc.id, 0) -%}
+          {{ n }} passage{{ "" if n == 1 else "s" }}
+          {%- if doc.page_count %}, {{ doc.page_count }} {{ "slide" if doc.mime_type.endswith("presentation") else "page" }}{{ "" if doc.page_count == 1 else "s" }}{% endif -%}
+        </span>
+        {% endif %}
+      </div>
+      <div class="actions">
+        <a class="button button-small button-secondary" href="/api/v1/documents/{{ doc.id }}/download"><span class="visually-hidden">Download </span>{{ "Open" if doc.mime_type == "application/pdf" else "Download" }}<span class="visually-hidden"> {{ doc.title }}</span></a>
+        {% if can_manage %}
+        {% if doc.status.value in ("ready", "failed") and not doc.reindexing %}
+        <form method="post" action="/modules/{{ module.id }}/materials/{{ doc.id }}/reindex" class="inline-form" data-confirm="Re-index &quot;{{ doc.title }}&quot;? It will be processed again.">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="button button-small button-secondary"><svg class="i"><use href="#redo"/></svg> Re-index<span class="visually-hidden"> {{ doc.title }}</span></button>
+        </form>
+        {% endif %}
+        <form method="post" action="/modules/{{ module.id }}/materials/{{ doc.id }}/delete" class="inline-form" data-confirm="Delete &quot;{{ doc.title }}&quot;? This cannot be undone.">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="button button-small button-danger">Delete<span class="visually-hidden"> {{ doc.title }}</span></button>
+        </form>
+        {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
   {% else %}
-  <p class="muted">No material has been uploaded to this module yet.</p>
+  <div class="empty">
+    <svg class="i"><use href="#inbox"/></svg>
+    <p class="empty-title">No material has been uploaded to this module yet.</p>
+    <p>Once faculty add slides or notes, they show up here.</p>
+  </div>
   {% endif %}
 </div>
