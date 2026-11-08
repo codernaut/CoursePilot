@@ -348,6 +348,9 @@ code {
   align-items: center;
   gap: 0.5rem 0.8rem;
   min-height: 68px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   padding: 0.6rem 1.5rem;
   background: var(--a);
   color: var(--on-a);
@@ -392,6 +395,8 @@ code {
 .nav {
   order: 1;
   margin-left: 0.8rem;
+  min-width: 0;
+  max-width: 100%;
 }
 .nav ul {
   display: flex;
@@ -1862,11 +1867,9 @@ tbody tr + tr > * {
   }
 }
 
-@media (max-width: 767px) {
-  .topbar {
-    padding: 0.6rem 0.9rem 0.9rem;
-    border-radius: 0 0 22px 22px;
-  }
+/* The nav collapses behind the menu button below 1280px: the admin bar (logo, 8 links, accent
+   swatches, theme toggle, user menu) needs about 1240px. Keep in sync with test_ui_design.py. */
+@media (max-width: 1279px) {
   .js .menu-btn {
     display: inline-grid;
   }
@@ -1899,6 +1902,13 @@ tbody tr + tr > * {
   }
   .theme-toggle {
     order: 3;
+  }
+}
+
+@media (max-width: 767px) {
+  .topbar {
+    padding: 0.6rem 0.9rem 0.9rem;
+    border-radius: 0 0 22px 22px;
   }
   .container {
     padding: 1.1rem 0.8rem 1.4rem;

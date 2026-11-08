@@ -227,6 +227,35 @@ def test_theme_js_only_applies_whitelisted_values() -> None:
     assert "innerHTML" not in js and "insertAdjacentHTML" not in js and "document.write" not in js
 
 
+def _css_block(css: str, header: str) -> str:
+    """Body of the first top-level block whose header matches (brace counting)."""
+    start = css.index(header)
+    open_at = css.index("{", start)
+    depth = 0
+    for pos in range(open_at, len(css)):
+        depth += {"{": 1, "}": -1}.get(css[pos], 0)
+        if depth == 0:
+            return css[open_at + 1 : pos]
+    raise AssertionError(header)
+
+
+def test_topbar_collapses_before_the_admin_nav_can_overflow() -> None:
+    css = (STATIC / "css" / "app.css").read_text(encoding="utf-8")
+    # Worst case (admin): logo ~200 + 8 links ~650 + swatches ~160 + toggle/menu ~100 + gaps and
+    # padding ~130 = ~1240px, so the menu-button layout must apply up to at least 1279px.
+    pattern = r"@media \(max-width: (\d+)px\) \{\s*\.js \.menu-btn"
+    widths = [int(w) for w in re.findall(pattern, css)]
+    assert widths and widths[0] >= 1279
+    collapse = _css_block(css, f"@media (max-width: {widths[0]}px) {{\n  .js .menu-btn")
+    assert ".js .topbar-menu" in collapse and 'data-menu-open="true"' in collapse
+    # safety net: the bar wraps and may shrink instead of pushing the page sideways
+    topbar = _css_block(css, "\n.topbar {")
+    assert "flex-wrap: wrap" in topbar and "min-width: 0" in topbar and "max-width: 100%" in topbar
+    nav = _css_block(css, "\n.nav {")
+    assert "min-width: 0" in nav
+    assert "flex-wrap: wrap" in _css_block(css, "\n.nav ul {")
+
+
 def test_usage_chart_scrolls_instead_of_shrinking_on_phones() -> None:
     html = render_usage([DayMessages(day="2026-11-01", questions=1, answers=1)])
     assert 'class="chart-scroll"' in html and 'tabindex="0"' in html
