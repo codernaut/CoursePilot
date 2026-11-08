@@ -2,7 +2,7 @@
 
 A RAG study assistant for a university programme's teaching material. Faculty upload slides, PDFs and notes into a fixed **Year › Block › Module** structure; students chat with an assistant that answers **from the uploaded material first, with citations**, and falls back to the web (clearly labelled) only when the material is insufficient.
 
-> Status: early development (milestones M0-M7 done: accounts, login, user admin, the programme structure, material upload and background processing, search with a passage viewer, chat with cited answers from the material, the labelled web fallback, and hardening: rate limits, an admin jobs and usage view, structured logs). See [CLAUDE.md](CLAUDE.md) for scope, architecture and the build plan.
+> Status: early development (milestones M0-M8 done: accounts, login, user admin, the programme structure, material upload and background processing, search with a passage viewer, chat with cited answers from the material, the labelled web fallback, and hardening: rate limits, an admin jobs and usage view, structured logs, deployment tooling: S3/R2 storage, backups, production checks). See [CLAUDE.md](CLAUDE.md) for scope, architecture and the build plan.
 
 No Docker, no Node, no externally installed servers: SQLite (with sqlite-vec and FTS5) for data and search, a FastAPI app that serves the web UI and the JSON API, and a background worker. Everything installs with pip/uv.
 
@@ -25,6 +25,14 @@ start.bat
 ### Letting other computers connect (no HTTPS)
 
 By default CoursePilot listens on this computer only. `setup` asks "Will other computers connect to this machine over the network without HTTPS?". Answer yes only on a closed network you trust: passwords and session cookies then travel unencrypted. Setup sets `APP_HOST=0.0.0.0`, `ALLOW_INSECURE_HTTP=true` and `BASE_URL` (for example `http://192.168.1.20:8000`); admins see a warning banner on every page. Anywhere else, put CoursePilot behind HTTPS (a reverse proxy) instead.
+
+## Deploying
+
+For a real server (HTTPS, services, backups, R2 storage, upgrades) see [docs/deploy.md](docs/deploy.md): a Linux VPS with Caddy (recommended), a Windows server, a trusted LAN, or a PaaS with a persistent disk. Production commands: `python -m app.cli serve` (web only), `python -m app.worker`, `python -m app.cli check --production`, `python -m app.cli backup` / `restore`. Example service files are in `deploy/`.
+
+## Deploying
+
+For a real server (HTTPS, services, backups, R2 storage, upgrades) see [docs/deploy.md](docs/deploy.md): a Linux VPS with Caddy (recommended), a Windows server, a trusted LAN, or a PaaS with a persistent disk. Production commands: `python -m app.cli serve` (web only), `python -m app.worker`, `python -m app.cli check --production`, `python -m app.cli backup` / `restore`. Example service files are in `deploy/`.
 
 ## Manual commands
 
@@ -58,6 +66,8 @@ Releases are cut by the owner only: bump `[project].version` in a commit, push, 
 
 - `backend/` — FastAPI app (API + server-rendered web UI), processing worker, retrieval and agent (Python 3.12, uv)
 - `setup.*`, `start.*` — thin install/start scripts
+- `deploy/` — systemd units, Caddyfile, Windows task script, Litestream and Cloudflare Tunnel examples
+- `deploy/` — systemd units, Caddyfile, Windows task script, Litestream and Cloudflare Tunnel examples
 - `scripts/` — release packaging (`build_release.py`)
 - `docs/` — architecture notes and ADRs
 

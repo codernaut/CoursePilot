@@ -32,7 +32,7 @@ ROOT_FILES = (
     ".env.example",
     "CLAUDE.md",
 )
-ROOT_DIRS = ("backend", "docs")
+ROOT_DIRS = ("backend", "docs", "deploy")
 
 # Skipped silently: build and cache output that is never part of a release.
 SKIP_DIR_NAMES = frozenset(

@@ -153,6 +153,21 @@ class Settings(BaseSettings):
                     "BASE_URL must be https:// in production (Secure cookies); "
                     "set ALLOW_INSECURE_HTTP=true only for a closed trusted network"
                 )
+        if self.storage_backend == "s3":
+            missing = [
+                name
+                for name, value in (
+                    ("S3_BUCKET", self.s3_bucket),
+                    ("S3_ACCESS_KEY_ID", self.s3_access_key_id),
+                    ("S3_SECRET_ACCESS_KEY", self.s3_secret_access_key),
+                )
+                if not value
+            ]
+            if missing:
+                raise ValueError(
+                    "STORAGE_BACKEND=s3 needs " + ", ".join(missing) + " in .env"
+                    " (S3_ENDPOINT_URL is required for Cloudflare R2 and other non-AWS services)"
+                )
         # Relative paths are anchored at the repo root so every process sees the same files.
         self.data_dir = _anchor(self.data_dir)
         self.checkpoint_db_path = _anchor(self.checkpoint_db_path)

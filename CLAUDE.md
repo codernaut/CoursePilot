@@ -49,7 +49,7 @@ Follow the build order in §14. Update this section as milestones land.
   - M1 security-review leftovers: password policy (`services/password_policy.py` plus a bundled common-password list), change-password throttle, audit retention purge in the worker, global request-body limit (`MAX_REQUEST_BODY_MB`), robust uv installation in `setup.sh`.
   - Version info (`app.__version__`, git commit, footer, `GET /api/v1/health/version`), CI reports and a Windows test job, and the tag-driven release workflow with `scripts/build_release.py` (§16).
 
-- **M2 done (2026-11-06):** `Storage` ABC + `LocalStorage` (`DATA_DIR/files/<aa>/<32-hex key>`, atomic temp-file + rename writes, key and containment checks; `get_storage()` raises a clear error for `s3` until M8), `app/jobs` (enqueue side only), streaming faculty-only multipart upload (`POST /api/v1/modules/{id}/documents`, exempt from the global body limit), content validation (`services/file_validation.py`), documents API (list, get, PATCH, DELETE, reindex, download), materials pages (module picker, list with HTMX polling, drag-and-drop upload with per-file progress in `static/js/materials.js`, delete/re-index forms) and tests. Decisions:
+- **M2 done (2026-11-06):** `Storage` ABC + `LocalStorage` (`DATA_DIR/files/<aa>/<32-hex key>`, atomic temp-file + rename writes, key and containment checks; `get_storage()` selects `S3Storage` for `s3`, M8), `app/jobs` (enqueue side only), streaming faculty-only multipart upload (`POST /api/v1/modules/{id}/documents`, exempt from the global body limit), content validation (`services/file_validation.py`), documents API (list, get, PATCH, DELETE, reindex, download), materials pages (module picker, list with HTMX polling, drag-and-drop upload with per-file progress in `static/js/materials.js`, delete/re-index forms) and tests. Decisions:
   - **Per-file results.** A request may carry up to 10 files. The response is `202 {"documents": [...], "errors": [{"filename", "code", "message", "status", "details"}]}` when at least one file was accepted. When none was, the HTTP status and error code of the first failing file are returned in the standard error shape, with every file's error in `details.errors` (single-file requests therefore get plain `409` / `413` / `415` / `422`). A file over `UPLOAD_MAX_MB` ends the request: it is rejected with 413, files before it are kept and the remaining body is not read. The web UI sends one request per file (progress bar per file).
   - **Validation order.** Extension allow-list (`415 unsupported_file_type`), then content while streaming (PDF `%PDF-`, ZIP magic for PPTX/DOCX, UTF-8 without NUL for MD/TXT/HTML), empty file (`422`), then after storing the zip structure of PPTX/DOCX (`[Content_Types].xml` plus `ppt/presentation.xml` or `word/document.xml`, no `..`/absolute names, at most 10,000 parts, declared decompressed size at most 200 MB). Extension and content mismatches are `415`. A request-wide cap of `UPLOAD_MAX_MB x 10 + 1 MB` bounds the whole body (`413`).
   - **Streaming and locks.** The upload handler never uses `request.form()`: the multipart body is parsed incrementally (`python_multipart`), so for this route the CSRF token must be in the `X-CSRF-Token` header (a `csrf_token` form field is only read from urlencoded forms). The write transaction opened by authentication is committed before streaming so a slow upload never holds the SQLite write lock; each file then registers (documents row + job + audit) in its own short transaction.
@@ -125,6 +125,14 @@ Follow the build order in §14. Update this section as milestones land.
   - **Security re-check (§13).** Every listed control has a test: existing ones for secrets, auth, sessions, CSRF/Origin, password policy and throttles, uploads, downloads, the access filter and prompt injection; new ones for the burst limits, redaction and logging fields (including that prompts, answers, material, emails, passwords and cookies never reach the log), LangSmith forcing, admin authorization and escaping, and the security headers on the new pages.
   - **Not done / deferred.** Rate-limit counters are not shared between processes; no memory limit for the parser child; the usage page has no charts; the feedback view is not paged.
 
+- **M8 done (2026-11-07):** S3Storage, backups, production checks, `serve`, deploy files and `docs/deploy.md`. Decisions:
+  - **S3Storage (`storage/s3.py`).** boto3 (`>=1.36,<2`) in `asyncio.to_thread`; client created on first use with path-style addressing, `s3v4`, and `request_checksum_calculation` / `response_checksum_validation` = `when_required` (R2 compatible). Objects live at `files/<aa>/<key>` (same key rules as LocalStorage). A write buffers 8 MiB parts: under one part it is a single `PutObject`, otherwise a multipart upload that only becomes an object on complete; `abort` aborts it. `check()` = `head_bucket` + a one-key list. `sweep_stale_temp` aborts multipart uploads older than the limit under `files/`. `Settings` requires `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` for `s3` (`S3_ENDPOINT_URL` is needed for R2). Downloads keep streaming through the app (no presigned URLs, no public bucket), so authorisation stays in one place. Tested with `moto` (`tests/unit/test_storage_contract.py` runs one contract suite on both backends; `tests/integration/test_s3_storage_app.py` the upload/download round trip). Not tested against a real R2 bucket.
+  - **Backups (`services/backup.py`, CLI `backup` / `restore`).** SQLite online backup API for `coursepilot.db` and `checkpoints.db` (integrity-checked), copy of `DATA_DIR/files` (LocalStorage only, `.tmp` skipped), `manifest.json` with version, commit, sizes and SHA-256 per file; default folder `DATA_DIR/backups/coursepilot-backup-<UTC>`; `--keep N` prunes old ones. `.env` and S3 buckets are not included. `restore` verifies every checksum (the manifest must list `coursepilot.db`, every file in the folder must be listed, symlinks and malformed entries are refused, all before anything live is touched; `--keep` must be >= 1), asks for confirmation, keeps the replaced files as `*.pre-restore-<stamp>`; the app and worker must be stopped.
+  - **`check --production` (`services/production_check.py`).** OK/WARN/FAIL checklist: APP_ENV, SECRET_KEY, BASE_URL/ALLOW_INSECURE_HTTP, BEHIND_PROXY consistency, provider keys, LangSmith, databases not on a network share, DATA_DIR writable, storage reachable. Exit 1 on any FAIL (also when Settings refuse to load).
+  - **`serve`.** Migrates (unless `--no-migrate`), runs uvicorn on `APP_HOST:APP_PORT`, no browser, `--with-worker` runs the worker as a child (single-instance PaaS). uvicorn's own proxy-header rewriting stays off: the app reads `X-Forwarded-For` itself, only with `BEHIND_PROXY`. `start.*` remains the local launcher.
+  - **`deploy/`** (in release zips): systemd units (web migrates in `ExecStartPre`, worker ordered after it), Caddyfile, `register-windows-tasks.ps1`, `litestream.yml`, `cloudflared-config.yml`. No new env vars.
+  - **Not done / deferred.** No real R2 bucket test; no automatic migration of existing local files to a bucket (documented rclone step); `restore` does not detect a running app.
+
 ### Licence
 
 CoursePilot is licensed under **AGPL-3.0-only** (decided by the owner on 2026-11-06). Anyone who distributes the code, or runs a modified version as a network service, must release their source under the same licence. Every dependency we add must be AGPL-compatible (MIT, BSD, Apache-2.0, LGPL, GPL-3.0 and AGPL-3.0 are fine; GPL-2.0-only and proprietary licences are not).
@@ -148,7 +156,7 @@ Choose these unless a decision in this file is explicitly changed. Nothing here 
 | Keyword search | **SQLite FTS5**: virtual table `chunks_fts` | Used for hybrid retrieval |
 | Migrations | **Alembic** with `render_as_batch=True` | Never change the schema without a migration. `env.py` excludes the virtual tables and their shadow tables (`chunk_vectors*`, `chunks_fts*`) from autogenerate (`include_object`); they are created by hand-written migration/ensure code |
 | Chat memory | `langgraph-checkpoint-sqlite` (`AsyncSqliteSaver`) in a separate file `CHECKPOINT_DB_PATH` | Persistent across restarts; no in-memory savers in production. Deleting a conversation also deletes its checkpoint thread |
-| File storage | `Storage` interface: **LocalStorage** (default) and **S3Storage** | LocalStorage keeps files under `DATA_DIR/files` with random keys. S3Storage (`boto3`, works with Cloudflare R2) is selected with `STORAGE_BACKEND=s3` and built in M8 |
+| File storage | `Storage` interface: **LocalStorage** (default) and **S3Storage** | LocalStorage keeps files under `DATA_DIR/files` with random keys. S3Storage (`boto3`, works with Cloudflare R2) is selected with `STORAGE_BACKEND=s3` |
 | Background jobs | `jobs` table in SQLite, run by a separate worker process (`python -m app.worker`) | Atomic claim with one `UPDATE … RETURNING` statement. Keep it behind an interface so it can be swapped later |
 | Document parsing | `pymupdf` (PDF, pinned `<2`), `python-pptx` (PPTX), `python-docx` (DOCX), `markdown-it-py` / plain text (MD, TXT), `beautifulsoup4` (HTML) | OCR fallback (`pytesseract`) is optional behind `OCR_ENABLED`; it needs a system Tesseract, so it is off by default |
 | Embeddings | `EMBEDDING_PROVIDER` = `gemini` (default), `voyage`, `openai`; `fake` for tests | Default `gemini-embedding-001`, 768 dims. Plain `httpx` calls, no vendor SDKs. `local` (sentence-transformers) is a later option. See §7.4 |
@@ -179,11 +187,12 @@ CoursePilot/
 ├── start.bat  start.sh          # migrate, start web app + worker, open the browser
 ├── VERSION                      # only inside release zips: "<version> <full sha>"
 ├── THIRD_PARTY_NOTICES.md
+├── deploy/                      # systemd units, Caddyfile, Windows task script, Litestream + Cloudflare Tunnel examples (M8)
 ├── scripts/build_release.py     # builds dist/coursepilot-<tag>.zip (+ .sha256); used by release.yml
 ├── .github/workflows/           # ci.yml (every push/PR), release.yml (v* tags)
 ├── docs/
 │   ├── architecture.md          # components + flows; keep in sync with this file
-│   ├── deploy.md                # from M8
+│   ├── deploy.md                # production guides (VPS, Windows, LAN, PaaS)
 │   └── decisions/               # short ADRs: NNNN-title.md
 ├── data/                        # gitignored: SQLite files, local storage (DATA_DIR)
 └── backend/
@@ -206,7 +215,7 @@ CoursePilot/
     │   │   ├── templates/       # Jinja2 templates
     │   │   └── static/          # css/, js/ (vanilla), htmx.min.js (vendored)
     │   ├── services/            # business logic (no FastAPI imports here)
-    │   ├── storage/             # Storage interface + local.py (+ s3.py in M8)
+    │   ├── storage/             # Storage interface + local.py + s3.py
     │   ├── ingestion/
     │   │   ├── parsers/         # one module per file type → list[ParsedSection]
     │   │   ├── chunker.py
@@ -552,6 +561,10 @@ uv run python -m app.cli create-admin      # hidden password prompt
 uv run python -m app.cli seed-structure     # idempotent; never renames or deletes
 uv run python -m app.cli migrate            # same as alembic upgrade head
 uv run python -m app.cli check              # SQLite version, FTS5, sqlite-vec
+uv run python -m app.cli check --production # go-live checklist, exit 1 on failures
+uv run python -m app.cli serve              # production web app only (migrates; --no-migrate, --with-worker)
+uv run python -m app.cli backup [--out DIR] [--keep N]   # online SQLite backup + local files + manifest
+uv run python -m app.cli restore DIR [--yes]  # verified restore; stop web and worker first
 uv run python -m app.cli start              # what start.* calls: migrate, web app + worker, open browser
 uv run python -m app.cli reindex-all        # after changing EMBEDDING_PROVIDER/MODEL/DIM
 uv run alembic upgrade head

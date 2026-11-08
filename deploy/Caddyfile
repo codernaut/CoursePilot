@@ -1,0 +1,17 @@
+# Caddy reverse proxy: automatic HTTPS (Let's Encrypt) in front of CoursePilot.
+#
+# Replace the hostname with your own (its DNS A/AAAA record must point at this server, and ports 80
+# and 443 must be open). Put this in /etc/caddy/Caddyfile and run: sudo systemctl reload caddy
+#
+# .env must then have: BASE_URL=https://study.example.edu, APP_HOST=127.0.0.1, BEHIND_PROXY=true
+# (CoursePilot trusts the LAST X-Forwarded-For entry, which is the one Caddy appends).
+study.example.edu {
+	encode zstd gzip
+
+	reverse_proxy 127.0.0.1:8000 {
+		# Stream chat answers (server-sent events) immediately instead of buffering them.
+		flush_interval -1
+	}
+
+	# No request body limit here: CoursePilot enforces UPLOAD_MAX_MB itself while streaming.
+}

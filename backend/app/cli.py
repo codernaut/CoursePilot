@@ -1,6 +1,7 @@
 """Command line: ``python -m app.cli <command>``.
 
-Commands: setup, create-admin, seed-structure, migrate, check, start, reindex-all.
+Commands: setup, create-admin, seed-structure, migrate, check, start, serve, reindex-all, backup,
+restore.
 """
 
 import argparse
@@ -13,6 +14,7 @@ import time
 import urllib.request
 import webbrowser
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Any
 
 from app.core.config import REPO_ROOT, Settings, get_settings
@@ -20,7 +22,7 @@ from app.core.errors import AppError
 from app.db.engine import MIN_SQLITE_VERSION, check_sqlite_capabilities
 from app.db.migrate import BACKEND_DIR, upgrade_to_head
 from app.db.session import Database
-from app.services import structure, users
+from app.services import backup, production_check, structure, users
 from app.setup_flow import ConsolePrompter, Prompter, SetupDeps, prompt_admin_details, run_setup
 
 
@@ -153,6 +155,134 @@ def run_reindex_all(
     return asyncio.run(_run())
 
 
+def run_production_check(settings_loader: Callable[[], Settings], p: Prompter) -> int:
+    """``check --production``: the go-live checklist. Invalid settings count as a failure."""
+    from pydantic import ValidationError
+
+    try:
+        settings = settings_loader()
+    except ValidationError as exc:
+        p.say("[FAIL] Settings are invalid, the app would not start:")
+        for error in exc.errors():
+            p.say(f"       {'.'.join(str(x) for x in error['loc']) or 'settings'}: {error['msg']}")
+        return 1
+    lines, code = production_check.run(settings)
+    for line in lines:
+        p.say(line)
+    return code
+
+
+def run_serve(
+    settings: Settings,
+    *,
+    migrate: bool = True,
+    with_worker: bool = False,
+    serve: Callable[..., Any] | None = None,
+    popen: Callable[..., Any] = subprocess.Popen,
+) -> int:
+    """Production web process, no browser. Run ``python -m app.worker`` separately, or pass
+    ``with_worker`` to run it as a child process (single-container hosts with one disk).
+
+    uvicorn's own proxy-header rewriting stays off: the app reads X-Forwarded-For itself, and only
+    when BEHIND_PROXY is set (``api.deps.client_ip``).
+    """
+    if migrate:
+        run_migrate(settings)
+    if serve is None:
+        import uvicorn
+
+        serve = uvicorn.run
+    worker = None
+    if with_worker:
+        worker = popen(
+            [sys.executable, "-m", "app.worker"], cwd=str(BACKEND_DIR), **worker_popen_options()
+        )
+    try:
+        serve(
+            "app.main:app",
+            host=settings.app_host,
+            port=settings.app_port,
+            log_level=settings.log_level.lower(),
+            proxy_headers=False,
+            access_log=False,
+            log_config=None,
+        )
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if worker is not None:
+            stop_worker(worker)
+    return 0
+
+
+def prune_backups(base: Path, keep: int) -> list[Path]:
+    """Delete the oldest ``coursepilot-backup-*`` folders beyond the newest ``keep``."""
+    import shutil
+
+    folders = sorted(
+        (f for f in base.glob("coursepilot-backup-*") if (f / backup.MANIFEST_NAME).is_file()),
+        key=lambda f: f.name,
+    )
+    doomed = folders[: max(0, len(folders) - keep)]
+    for folder in doomed:
+        shutil.rmtree(folder, ignore_errors=True)
+    return doomed
+
+
+def run_backup(
+    settings: Settings, p: Prompter, *, out: Path | None = None, keep: int | None = None
+) -> int:
+    if keep is not None and keep < 1:
+        p.say("--keep must be at least 1.")
+        return 1
+    try:
+        result = backup.create_backup(settings, out)
+    except (backup.BackupError, OSError) as exc:
+        p.say(f"Backup failed: {exc}")
+        return 1
+    manifest = result.manifest
+    p.say(
+        f"Backup written to {result.path} ({manifest['total_bytes']} bytes, "
+        f"{manifest['file_count']} uploaded file(s))."
+    )
+    if manifest["storage_backend"] != "local":
+        p.say("Uploaded files are in S3 storage and are NOT part of this backup.")
+    p.say("The .env file (secrets) is not included; keep a copy of it somewhere safe.")
+    if keep is not None:
+        for old in prune_backups(result.path.parent, keep):
+            p.say(f"Removed old backup {old.name}.")
+    return 0
+
+
+def run_restore(settings: Settings, p: Prompter, folder: Path, *, yes: bool = False) -> int:
+    try:
+        manifest = backup.verify_backup(folder)
+    except (backup.BackupError, OSError) as exc:
+        p.say(f"Cannot restore: {exc}")
+        return 1
+    p.say(
+        f"Backup of version {manifest.get('version')} made {manifest.get('created_at')} "
+        f"({manifest.get('file_count')} uploaded file(s)); all checksums match."
+    )
+    p.say(
+        "This replaces the current databases and uploaded files. "
+        "Stop the web app AND the worker first."
+    )
+    p.say("The current files are kept next to the new ones as <name>.pre-restore-<timestamp>.")
+    if not yes and p.ask("Restore now? [y/N]:").strip().lower() not in ("y", "yes"):
+        p.say("Cancelled. Nothing was changed.")
+        return 1
+    try:
+        done = backup.restore_backup(settings, folder)
+    except (backup.BackupError, OSError) as exc:
+        p.say(f"Restore failed: {exc}")
+        return 1
+    for line in done:
+        p.say(line)
+    p.say("Done. Start the app and the worker; migrations run on start.")
+    return 0
+
+
 def default_setup_deps() -> SetupDeps:
     def migrate(settings: Settings) -> None:
         from pathlib import Path
@@ -266,8 +396,32 @@ def build_parser() -> argparse.ArgumentParser:
     admin.add_argument("--email", help="email address (prompted when omitted)")
     sub.add_parser("seed-structure", help="create missing years, blocks and modules")
     sub.add_parser("migrate", help="apply database migrations")
-    sub.add_parser("check", help="verify SQLite, FTS5 and sqlite-vec")
+    check = sub.add_parser("check", help="verify SQLite, FTS5 and sqlite-vec")
+    check.add_argument(
+        "--production",
+        action="store_true",
+        help="also print the go-live checklist (exit 1 on failures)",
+    )
     sub.add_parser("start", help="migrate, start the web app and worker, open the browser")
+    serve = sub.add_parser(
+        "serve", help="production: migrate and run the web app only (no browser)"
+    )
+    serve.add_argument("--no-migrate", action="store_true", help="skip the migration step")
+    serve.add_argument(
+        "--with-worker", action="store_true", help="also run the worker as a child process"
+    )
+    backup_cmd = sub.add_parser(
+        "backup", help="consistent backup of the databases and uploaded files"
+    )
+    backup_cmd.add_argument(
+        "--out", type=Path, help="folder for backups (default DATA_DIR/backups)"
+    )
+    backup_cmd.add_argument(
+        "--keep", type=int, help="keep only the newest N backups in that folder"
+    )
+    restore_cmd = sub.add_parser("restore", help="restore a backup (stop the app and worker first)")
+    restore_cmd.add_argument("folder", type=Path, help="a coursepilot-backup-* folder")
+    restore_cmd.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     reindex = sub.add_parser(
         "reindex-all",
         help="rebuild the vector index after changing EMBEDDING_PROVIDER/MODEL/DIM",
@@ -280,7 +434,10 @@ def main(argv: Sequence[str] | None = None, *, prompter: Prompter | None = None)
     args = build_parser().parse_args(argv)
     p = prompter or ConsolePrompter()
     if args.command == "check":
-        return run_check(p)
+        code = run_check(p)
+        if args.production:
+            code = max(code, run_production_check(get_settings, p))
+        return code
     if args.command == "setup":
         return run_setup(
             p,
@@ -303,6 +460,12 @@ def main(argv: Sequence[str] | None = None, *, prompter: Prompter | None = None)
         return run_reindex_all(settings, p, yes=args.yes)
     elif args.command == "start":
         return run_start(settings)
+    elif args.command == "serve":
+        return run_serve(settings, migrate=not args.no_migrate, with_worker=args.with_worker)
+    elif args.command == "backup":
+        return run_backup(settings, p, out=args.out, keep=args.keep)
+    elif args.command == "restore":
+        return run_restore(settings, p, args.folder, yes=args.yes)
     return 0
 
 

@@ -1,4 +1,4 @@
-"""File storage: a ``Storage`` interface with a local-disk implementation (S3 comes in M8)."""
+"""File storage: a ``Storage`` interface with local-disk and S3-compatible implementations."""
 
 from app.core.config import Settings
 from app.storage.base import (
@@ -10,19 +10,19 @@ from app.storage.base import (
     new_key,
 )
 from app.storage.local import LocalStorage
+from app.storage.s3 import S3Storage
 
 
 def get_storage(settings: Settings) -> Storage:
     if settings.storage_backend == "local":
         return LocalStorage(settings.data_dir)
-    raise NotImplementedError(
-        "STORAGE_BACKEND=s3 is not implemented until M8; set STORAGE_BACKEND=local."
-    )
+    return S3Storage.from_settings(settings)
 
 
 __all__ = [
     "InvalidKeyError",
     "LocalStorage",
+    "S3Storage",
     "Storage",
     "StorageError",
     "StorageNotFoundError",

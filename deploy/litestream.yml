@@ -1,0 +1,36 @@
+# Litestream: continuous replication of the SQLite databases to a Cloudflare R2 (S3) bucket.
+# OPTIONAL. It complements, and does not replace, `python -m app.cli backup` (which also covers
+# uploaded files and gives you a verified, dated copy).
+#
+# Use a SEPARATE bucket from the one holding uploaded material, and a token that can only write to
+# it. Install Litestream (https://litestream.io/install/), put this file at /etc/litestream.yml and
+# provide the credentials as environment variables (for example in /etc/default/litestream):
+#   LITESTREAM_ACCESS_KEY_ID=...   LITESTREAM_SECRET_ACCESS_KEY=...
+#   R2_ACCOUNT_ID=...              R2_BACKUP_BUCKET=coursepilot-db-replica
+#
+# Restore on a new machine (app and worker stopped, empty data/ folder):
+#   litestream restore -config /etc/litestream.yml -o /opt/coursepilot/data/coursepilot.db \
+#       /opt/coursepilot/data/coursepilot.db
+#   litestream restore -config /etc/litestream.yml -o /opt/coursepilot/data/checkpoints.db \
+#       /opt/coursepilot/data/checkpoints.db
+access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
+
+dbs:
+  - path: /opt/coursepilot/data/coursepilot.db
+    replicas:
+      - type: s3
+        bucket: ${R2_BACKUP_BUCKET}
+        path: coursepilot.db
+        endpoint: https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+        region: auto
+        retention: 168h # keep a week of history
+        sync-interval: 10s
+  - path: /opt/coursepilot/data/checkpoints.db
+    replicas:
+      - type: s3
+        bucket: ${R2_BACKUP_BUCKET}
+        path: checkpoints.db
+        endpoint: https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+        region: auto
+        retention: 168h

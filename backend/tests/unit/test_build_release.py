@@ -36,6 +36,8 @@ def make_repo(root: Path, version: str = "0.2.0") -> Path:
     (root / "backend" / "tests" / "test_x.py").write_text("def test_x(): pass\n", encoding="utf-8")
     (root / "docs").mkdir()
     (root / "docs" / "a.md").write_text("docs\n", encoding="utf-8")
+    (root / "deploy").mkdir()
+    (root / "deploy" / "coursepilot-web.service").write_text("[Unit]\n", encoding="utf-8")
     for name in br.ROOT_FILES:
         (root / name).write_text(f"{name}\n", encoding="utf-8")
     return root
@@ -138,7 +140,14 @@ def test_build_contains_required_files_and_version_file(tmp_path: Path) -> None:
     zip_path, checksum_path = br.build_zip(repo, tmp_path / "dist", "v0.2.0", SHA)
     assert zip_path.name == "coursepilot-v0.2.0.zip"
     found = names(zip_path)
-    for required in (*br.ROOT_FILES, "backend/pyproject.toml", "backend/app/main.py", "docs/a.md"):
+    required_files = (
+        *br.ROOT_FILES,
+        "backend/pyproject.toml",
+        "backend/app/main.py",
+        "docs/a.md",
+        "deploy/coursepilot-web.service",
+    )
+    for required in required_files:
         assert required in found
     assert "backend/tests/test_x.py" in found  # tests are fine to include
     with zipfile.ZipFile(zip_path) as archive:

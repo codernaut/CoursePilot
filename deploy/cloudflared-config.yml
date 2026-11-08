@@ -1,0 +1,23 @@
+# Cloudflare Tunnel: publish CoursePilot on the internet without opening any inbound port and
+# without running your own reverse proxy (Cloudflare terminates HTTPS). Works on Linux and Windows.
+#
+# Setup (once):
+#   cloudflared tunnel login
+#   cloudflared tunnel create coursepilot
+#   cloudflared tunnel route dns coursepilot study.example.edu
+#   cloudflared service install        (runs the tunnel as a system service)
+#
+# Replace TUNNEL_ID and the paths. .env must then have:
+#   BASE_URL=https://study.example.edu   APP_HOST=127.0.0.1   BEHIND_PROXY=true
+# Note: all traffic and the (decrypted) material pass through Cloudflare; make sure your
+# institution is fine with that.
+tunnel: TUNNEL_ID
+credentials-file: /etc/cloudflared/TUNNEL_ID.json
+
+ingress:
+  - hostname: study.example.edu
+    service: http://127.0.0.1:8000
+    originRequest:
+      # Long chat answers are streamed; do not cut idle connections early.
+      keepAliveTimeout: 90s
+  - service: http_status:404

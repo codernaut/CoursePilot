@@ -42,3 +42,21 @@ All of these are AGPL-compatible. `uv.lock` holds the exact versions.
 | `langchain-google-genai` | MIT | Uses `google-genai` (Apache-2.0). |
 
 All of these are AGPL-compatible. `uv.lock` holds the exact versions.
+
+### Direct dependencies added in M8 (deploy)
+
+| Package | Licence | Notes |
+|---|---|---|
+| `boto3` | Apache-2.0 | `S3Storage` (AWS S3, Cloudflare R2). Pulls in `botocore` (Apache-2.0), `s3transfer` (Apache-2.0) and `jmespath` (MIT). |
+| `moto` (dev only) | Apache-2.0 | S3 emulator for the storage tests; not shipped at runtime. |
+
+All of these are AGPL-compatible. `uv.lock` holds the exact versions.
+
+### Direct dependencies added in M8 (deploy)
+
+| Package | Licence | Notes |
+|---|---|---|
+| `boto3` | Apache-2.0 | `S3Storage` (AWS S3, Cloudflare R2). Pulls in `botocore` (Apache-2.0), `s3transfer` (Apache-2.0) and `jmespath` (MIT). |
+| `moto` (dev only) | Apache-2.0 | S3 emulator for the storage tests; not shipped at runtime. |
+
+All of these are AGPL-compatible. `uv.lock` holds the exact versions.

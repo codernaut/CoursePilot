@@ -1,0 +1,32 @@
+# systemd unit for the CoursePilot processing worker (Linux VPS). See coursepilot-web.service.
+#
+# The worker parses, chunks and embeds uploaded material. It reads .env once at startup: restart it
+# after changing keys (sudo systemctl restart coursepilot-worker).
+[Unit]
+Description=CoursePilot processing worker
+# Ordered after the web unit so its ExecStartPre (migrations) has finished first.
+After=network-online.target coursepilot-web.service
+Wants=network-online.target coursepilot-web.service
+
+[Service]
+Type=simple
+User=coursepilot
+Group=coursepilot
+WorkingDirectory=/opt/coursepilot/backend
+ExecStart=/opt/coursepilot/backend/.venv/bin/python -m app.worker
+Restart=on-failure
+RestartSec=5
+# SIGTERM: the running job gets 20 s to finish, then it is released back to the queue.
+TimeoutStopSec=40
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/coursepilot/data
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

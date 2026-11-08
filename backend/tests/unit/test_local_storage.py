@@ -7,6 +7,7 @@ from app.core.config import Settings
 from app.storage import (
     InvalidKeyError,
     LocalStorage,
+    S3Storage,
     StorageError,
     StorageNotFoundError,
     get_storage,
@@ -163,9 +164,10 @@ async def test_symlink_escape_is_rejected(tmp_path: Path) -> None:
 
 def test_get_storage_selects_by_backend(tmp_path: Path) -> None:
     assert isinstance(get_storage(make_settings(tmp_path)), LocalStorage)
-    s3: Settings = make_settings(tmp_path, storage_backend="s3")
-    with pytest.raises(NotImplementedError, match="M8"):
-        get_storage(s3)
+    s3: Settings = make_settings(
+        tmp_path, storage_backend="s3", s3_access_key_id="k", s3_secret_access_key="s"
+    )
+    assert isinstance(get_storage(s3), S3Storage)
 
 
 async def test_sweep_removes_only_stale_temp_files(tmp_path: Path) -> None:

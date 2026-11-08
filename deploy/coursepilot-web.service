@@ -1,0 +1,40 @@
+# systemd unit for the CoursePilot web app (Linux VPS).
+#
+# Install:
+#   sudo useradd --system --home /opt/coursepilot --shell /usr/sbin/nologin coursepilot
+#   (unpack the release to /opt/coursepilot, run ./setup.sh as that user, see docs/deploy.md)
+#   sudo cp deploy/coursepilot-web.service deploy/coursepilot-worker.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now coursepilot-web coursepilot-worker
+#
+# Adjust the paths below if you install somewhere else. setup.sh creates backend/.venv, so uv is
+# not needed at runtime.
+[Unit]
+Description=CoursePilot web app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=coursepilot
+Group=coursepilot
+WorkingDirectory=/opt/coursepilot/backend
+# Migrations run before the app starts (and before the worker, which is ordered after this unit).
+ExecStartPre=/opt/coursepilot/backend/.venv/bin/python -m app.cli migrate
+ExecStart=/opt/coursepilot/backend/.venv/bin/python -m app.cli serve --no-migrate
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+# Hardening: the app only needs to write below data/.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/coursepilot/data
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target
