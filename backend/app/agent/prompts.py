@@ -10,11 +10,14 @@ length-capped, escaped and placed inside a labelled data element.
 import html
 import re
 from collections.abc import Sequence
+from typing import Any
+
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from app.retrieval.hybrid import RetrievedChunk
 from app.websearch.base import WebResult, clean_line
 
-PROMPT_VERSION = "chat-2026-11-07.3"
+PROMPT_VERSION = "chat-2026-11-09.1"
 
 SYSTEM_PROMPT = """\
 You are CoursePilot, a study assistant for a university programme. You help students learn from \
@@ -78,6 +81,8 @@ NOT_FOUND_WEB_MESSAGE = (
     "did not help either. Try rephrasing the question."
 )
 
+LENGTH_NOTE = "(Answer shortened to fit the length limit.)"
+
 EMPTY_ANSWER_MESSAGE = "The assistant did not produce an answer this time. Please try asking again."
 
 SOURCE_TAG = "source"
@@ -132,10 +137,14 @@ def defang_markers(text: str) -> str:
     return _FAKE_MARKER.sub(lambda m: "(" + m.group(1) + ")", text)
 
 
-def format_sources(sources: Sequence[tuple[str, RetrievedChunk]]) -> str:
-    """The numbered, delimited context block: ``(marker, chunk)`` pairs in order."""
+def format_sources(
+    sources: Sequence[tuple[str, RetrievedChunk]], texts: Sequence[str] | None = None
+) -> str:
+    """The numbered, delimited context block: ``(marker, chunk)`` pairs in order. ``texts`` (same
+    order) is what the model sees of each passage (see ``agent.overlap.model_texts``); without it
+    the chunk's default ``llm_text`` is used."""
     parts = ["<sources>"]
-    for marker, chunk in sources:
+    for index, (marker, chunk) in enumerate(sources):
         attrs = [
             f'id="{_attr(marker)}"',
             f'document="{_attr(chunk.document_title)}"',
@@ -146,7 +155,7 @@ def format_sources(sources: Sequence[tuple[str, RetrievedChunk]]) -> str:
         if chunk.section_path:
             attrs.append(f'section="{_attr(chunk.section_path)}"')
         parts.append(f"<{SOURCE_TAG} {' '.join(attrs)}>")
-        parts.append(neutralise(chunk.llm_text))
+        parts.append(neutralise(chunk.llm_text if texts is None else texts[index]))
         parts.append(f"</{SOURCE_TAG}>")
     parts.append("</sources>")
     return "\n".join(parts)
@@ -175,13 +184,56 @@ def build_answer_human(
     sources: Sequence[tuple[str, RetrievedChunk]],
     web: Sequence[tuple[str, WebResult]] = (),
     web_note: str | None = None,
+    source_texts: Sequence[str] | None = None,
 ) -> str:
-    blocks = [format_sources(sources)]
+    blocks = [format_sources(sources, source_texts)]
     if web:
         blocks.append(format_web_results(web))
     if web_note:
         blocks.append(f"Search note: {web_note}")
     return "\n\n".join(blocks) + f"\n\nStudent question: {question}"
+
+
+CACHE_CONTROL: dict[str, str] = {"type": "ephemeral"}
+
+
+def _cached_text(text: str) -> list[dict[str, Any]]:
+    """A content block list with an Anthropic prompt-cache breakpoint after ``text``."""
+    return [{"type": "text", "text": text, "cache_control": dict(CACHE_CONTROL)}]
+
+
+def build_answer_messages(
+    module_path: str | None,
+    history: Sequence[BaseMessage],
+    question: str,
+    sources: Sequence[tuple[str, RetrievedChunk]],
+    web: Sequence[tuple[str, WebResult]] = (),
+    web_note: str | None = None,
+    source_texts: Sequence[str] | None = None,
+    *,
+    cache: bool = False,
+) -> list[BaseMessage]:
+    """The answer prompt, stable prefix first: the system message (instructions and module path),
+    the earlier turns, then ONE human message with the sources, web results and the question.
+    With ``cache`` (Anthropic prompt caching) the system block and the last history message carry
+    a ``cache_control`` breakpoint, so everything before the per-turn sources can be reused."""
+    system = build_system_prompt(module_path)
+    messages: list[BaseMessage] = [
+        SystemMessage(content=_cached_text(system) if cache else system)  # type: ignore[arg-type]
+    ]
+    for position, message in enumerate(history):
+        text = message.content if isinstance(message.content, str) else str(message.content)
+        last = position == len(history) - 1
+        content: Any = _cached_text(text) if cache and last else text
+        messages.append(
+            AIMessage(content=content)
+            if isinstance(message, AIMessage)
+            else HumanMessage(content=content)
+        )
+    messages.append(
+        HumanMessage(content=build_answer_human(question, sources, web, web_note, source_texts))
+    )
+    return messages
 
 
 def build_rewrite_human(history: str, question: str) -> str:

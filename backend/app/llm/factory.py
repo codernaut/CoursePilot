@@ -10,13 +10,12 @@ catalogue is hardcoded here. A local provider (Ollama) later means one more bran
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from app.core.config import Settings
 
-MAIN_MAX_TOKENS = 2048
-FAST_MAX_TOKENS = 400
 MAX_RETRIES = 1
 
 
@@ -78,20 +77,31 @@ def build_chat_models(settings: Settings) -> ChatModels:
     provider_id = _PROVIDERS[settings.llm_provider][0]
     timeout = float(settings.agent_timeout_s)
 
+    # The output-length parameter has a different name per provider: langchain-anthropic takes
+    # ``max_tokens``; langchain-google-genai's field is ``max_output_tokens`` (``max_tokens`` is
+    # only an alias there).
+    limit_name = "max_output_tokens" if settings.llm_provider == "gemini" else "max_tokens"
+
     def make(model: str, *, max_tokens: int, temperature: float) -> BaseChatModel:
-        return init_chat_model(
+        options: dict[str, Any] = {limit_name: max_tokens}
+        built: BaseChatModel = init_chat_model(
             model,
             model_provider=provider_id,
             api_key=key,
-            max_tokens=max_tokens,
             temperature=temperature,
             timeout=timeout,
             max_retries=MAX_RETRIES,
+            **options,
         )
+        return built
 
     return ChatModels(
-        main=make(settings.llm_model, max_tokens=MAIN_MAX_TOKENS, temperature=0.2),
-        fast=make(settings.llm_fast_model, max_tokens=FAST_MAX_TOKENS, temperature=0.0),
+        main=make(settings.llm_model, max_tokens=settings.llm_max_output_tokens, temperature=0.2),
+        fast=make(
+            settings.llm_fast_model,
+            max_tokens=settings.llm_fast_max_output_tokens,
+            temperature=0.0,
+        ),
         main_name=settings.llm_model,
         fast_name=settings.llm_fast_model,
         provider=settings.llm_provider,

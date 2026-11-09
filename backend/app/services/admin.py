@@ -179,6 +179,8 @@ async def usage(db: AsyncSession, settings: Settings, *, days: int = 30) -> Usag
                 func.sum(_tokens("input_tokens")),
                 func.sum(_tokens("output_tokens")),
                 func.sum(_tokens("total_tokens")),
+                func.sum(_tokens("cache_read_input_tokens")),
+                func.sum(_tokens("cache_creation_input_tokens")),
             )
             .where(Message.created_at >= start, Message.role == MessageRole.ASSISTANT)
             .group_by(day, Message.model)
@@ -239,8 +241,10 @@ async def usage(db: AsyncSession, settings: Settings, *, days: int = 30) -> Usag
                 input_tokens=int(i or 0),
                 output_tokens=int(o or 0),
                 total_tokens=int(t or 0),
+                cache_read_tokens=int(cr or 0),
+                cache_creation_tokens=int(cc or 0),
             )
-            for d, model, i, o, t in per_model
+            for d, model, i, o, t, cr, cc in per_model
         ],
         top_users=[
             UserUsage(

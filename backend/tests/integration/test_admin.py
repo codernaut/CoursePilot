@@ -255,6 +255,28 @@ async def add_exchange(
         return reply
 
 
+async def test_usage_reports_cached_tokens(
+    app: FastAPI, make_actor: ActorFactory, module: Module
+) -> None:
+    admin = await make_actor(Role.ADMIN)
+    alice = await make_actor(Role.STUDENT, email="alice@example.edu")
+    usage = {
+        "input_tokens": 100,
+        "output_tokens": 10,
+        "total_tokens": 110,
+        "cache_read_input_tokens": 70,
+        "cache_creation_input_tokens": 20,
+    }
+    await add_exchange(app, alice.user.id, usage=usage)
+    await add_exchange(app, alice.user.id, usage=usage)
+    row = (await admin.client.get(f"{API}/usage")).json()["tokens_per_day"][0]
+    assert (row["cache_read_tokens"], row["cache_creation_tokens"]) == (140, 40)
+    assert (
+        "140 input tokens came from the prompt cache"
+        in (await admin.client.get("/admin/usage")).text
+    )
+
+
 async def test_usage_numbers(
     app: FastAPI, make_actor: ActorFactory, module: Module, settings: Any
 ) -> None:

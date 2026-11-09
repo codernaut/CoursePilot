@@ -41,6 +41,7 @@ class AgentState(TypedDict, total=False):
     web_results: list[dict[str, Any]]  # WebResult.to_dict(), cleared at the end of the turn
     web_queries: list[str]
     answer: str
+    truncated: bool  # the answer stopped at the output-length limit
     used_web: bool
     citations: list[dict[str, Any]]
     dropped_markers: list[str]
@@ -79,6 +80,7 @@ def new_turn_input(question: str) -> dict[str, Any]:
         "web_results": [],
         "web_queries": [],
         "answer": "",
+        "truncated": False,
         "used_web": False,
         "citations": [],
         "dropped_markers": [],

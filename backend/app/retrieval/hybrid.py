@@ -32,7 +32,7 @@ LEVELS: tuple[Level, ...] = ("module", "block", "all")
 
 RRF_K = 60
 CANDIDATES = 20  # top-k of each of the two rankings before fusion
-LLM_TEXT_CHARS = 1500
+LLM_TEXT_CHARS = 1000  # default of RETRIEVAL_LLM_CHARS
 MAX_QUERY_CHARS = 1000
 MAX_FTS_TOKENS = 32
 MAX_TOKEN_CHARS = 64
@@ -89,10 +89,9 @@ class RetrievedChunk:
 
     @property
     def llm_text(self) -> str:
-        """The text sent to the LLM, truncated to control the token budget."""
-        if len(self.text) <= LLM_TEXT_CHARS:
-            return self.text
-        return self.text[:LLM_TEXT_CHARS].rstrip() + "…"
+        """The text sent to the LLM with the default budget (the agent passes
+        ``RETRIEVAL_LLM_CHARS`` through ``app.agent.overlap.model_texts``)."""
+        return truncate_text(self.text, LLM_TEXT_CHARS)
 
     @property
     def location(self) -> str | None:
@@ -118,6 +117,19 @@ class TierResult:
 
 
 # -- pure helpers ----------------------------------------------------------------------------------
+
+
+def truncate_text(text: str, limit: int) -> str:
+    """``text`` cut to about ``limit`` characters at a word boundary, with an ellipsis. Text without
+    blanks near the limit (e.g. CJK) is cut hard at the limit."""
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    if not text[limit].isspace():
+        boundary = max(cut.rfind(" "), cut.rfind("\n"), cut.rfind("\t"))
+        if boundary > limit // 2:
+            cut = cut[:boundary]
+    return cut.rstrip() + "…"
 
 
 def build_fts_query(query: str) -> str | None:

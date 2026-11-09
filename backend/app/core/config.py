@@ -60,6 +60,9 @@ class Settings(BaseSettings):
     llm_provider: Literal["anthropic", "gemini", "fake"] = "anthropic"
     llm_model: str = "claude-sonnet-5-5"
     llm_fast_model: str = "claude-haiku-5-5"
+    llm_max_output_tokens: int = Field(1024, ge=64, le=16000)  # the answer
+    llm_fast_max_output_tokens: int = Field(256, ge=16, le=2000)  # rewrite and judge calls
+    llm_prompt_cache: bool = True  # Anthropic prompt caching (no effect on other providers)
     anthropic_api_key: SecretStr | None = None
     google_api_key: SecretStr | None = None
 
@@ -77,7 +80,8 @@ class Settings(BaseSettings):
     web_allowed_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
     # Retrieval
-    retrieval_top_k: int = Field(8, ge=1)
+    retrieval_top_k: int = Field(6, ge=1)
+    retrieval_llm_chars: int = Field(1000, ge=200, le=4000)  # model-visible text per passage
     retrieval_min_score: float = Field(0.0, ge=0.0, le=1.0)  # min cosine similarity
     retrieval_min_hits: int = Field(1, ge=0)
     rerank_enabled: bool = False

@@ -40,6 +40,9 @@ class FakeChatModel(BaseChatModel):
     delay_s: float = 0.0  # pause before each streamed word (to test cancellation and timeouts)
     error: Any = None  # an exception instance raised on every call
     model_name: str = "fake-chat"
+    stop_reason: str | None = None  # e.g. "max_tokens", reported like Anthropic does
+    # extra ``usage_metadata`` keys, e.g. {"input_token_details": {"cache_read": 5}}
+    usage_extra: dict[str, Any] = Field(default_factory=dict)
 
     @property
     def _llm_type(self) -> str:
@@ -51,11 +54,18 @@ class FakeChatModel(BaseChatModel):
             raise self.error
         return str(self.responder(list(messages)))
 
-    @staticmethod
-    def _usage(messages: list[BaseMessage], reply: str) -> Any:
+    def _usage(self, messages: list[BaseMessage], reply: str) -> Any:
         prompt = sum(_tokens(str(m.content)) for m in messages)
         out = _tokens(reply)
-        return {"input_tokens": prompt, "output_tokens": out, "total_tokens": prompt + out}
+        return {
+            "input_tokens": prompt,
+            "output_tokens": out,
+            "total_tokens": prompt + out,
+            **self.usage_extra,
+        }
+
+    def _metadata(self) -> dict[str, Any]:
+        return {"stop_reason": self.stop_reason} if self.stop_reason else {}
 
     def _generate(
         self,
@@ -65,7 +75,11 @@ class FakeChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         reply = self._reply(messages)
-        message = AIMessage(content=reply, usage_metadata=self._usage(messages, reply))
+        message = AIMessage(
+            content=reply,
+            usage_metadata=self._usage(messages, reply),
+            response_metadata=self._metadata(),
+        )
         return ChatResult(generations=[ChatGeneration(message=message)])
 
     async def _agenerate(
@@ -78,7 +92,11 @@ class FakeChatModel(BaseChatModel):
         reply = self._reply(messages)
         if self.delay_s:
             await asyncio.sleep(self.delay_s)
-        message = AIMessage(content=reply, usage_metadata=self._usage(messages, reply))
+        message = AIMessage(
+            content=reply,
+            usage_metadata=self._usage(messages, reply),
+            response_metadata=self._metadata(),
+        )
         return ChatResult(generations=[ChatGeneration(message=message)])
 
     async def _astream(
@@ -94,5 +112,9 @@ class FakeChatModel(BaseChatModel):
                 await asyncio.sleep(self.delay_s)
             yield ChatGenerationChunk(message=AIMessageChunk(content=word))
         yield ChatGenerationChunk(
-            message=AIMessageChunk(content="", usage_metadata=self._usage(messages, reply))
+            message=AIMessageChunk(
+                content="",
+                usage_metadata=self._usage(messages, reply),
+                response_metadata=self._metadata(),
+            )
         )

@@ -100,6 +100,16 @@ def strip_markers(text: str) -> str:
     return validate_citations(text, Registry()).text
 
 
+# an unfinished marker at the very end: "[", "[C", "[C1", "[C1,", "[C1, W"
+_PARTIAL_TAIL = re.compile(r"[ \t]*\[(?:\s*[CW]\d{0,3}(?:\s*[,;]\s*(?:[CW]\d{0,3})?)*)?\s*\Z")
+
+
+def strip_partial_marker(text: str) -> str:
+    """Remove a citation marker that an output-length cut left half written at the end of ``text``
+    (``... as shown [C1, C``), so a marker is never shown cut in half."""
+    return _PARTIAL_TAIL.sub("", text)
+
+
 def citation_payload(marker: str, chunk: RetrievedChunk) -> dict[str, Any]:
     """The structured source the UI shows for a marker (also stored in ``messages.citations``).
     ``kind`` (``material`` | ``web``) is the key the UI branches on; ``type`` is the same value."""

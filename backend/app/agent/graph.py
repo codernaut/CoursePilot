@@ -34,8 +34,14 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import Runtime
 
-from app.agent import prompts, tools
-from app.agent.citations import Registry, cited_payloads, strip_markers, validate_citations
+from app.agent import overlap, prompts, tools
+from app.agent.citations import (
+    Registry,
+    cited_payloads,
+    strip_markers,
+    strip_partial_marker,
+    validate_citations,
+)
 from app.agent.state import (
     HISTORY_MAX_CHARS,
     HISTORY_MAX_TURNS,
@@ -107,7 +113,32 @@ def _add_usage(current: dict[str, Any], message: BaseMessage | None) -> dict[str
     if usage:
         for key in ("input_tokens", "output_tokens", "total_tokens"):
             merged[key] = int(merged.get(key, 0)) + int(usage.get(key, 0) or 0)
+        details = usage.get("input_token_details") or {}
+        read = details.get("cache_read")
+        created = [
+            details.get(k)
+            for k in ("cache_creation", "ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens")
+        ]
+        if read is not None:  # only when the provider reports them
+            merged["cache_read_input_tokens"] = int(merged.get("cache_read_input_tokens", 0)) + int(
+                read
+            )
+        if any(c is not None for c in created):
+            merged["cache_creation_input_tokens"] = int(
+                merged.get("cache_creation_input_tokens", 0)
+            ) + sum(int(c or 0) for c in created)
     return merged
+
+
+_LIMIT_REASONS = {"max_tokens", "length", "max_output_tokens"}
+
+
+def _hit_length_limit(message: BaseMessage) -> bool:
+    """Did the provider stop this reply because of the output-length limit (Anthropic
+    ``stop_reason=max_tokens``, Gemini ``finish_reason=MAX_TOKENS``, OpenAI-style ``length``)?"""
+    meta = message.response_metadata or {}
+    reason = meta.get("stop_reason") or meta.get("finish_reason")
+    return isinstance(reason, str) and reason.lower() in _LIMIT_REASONS
 
 
 def _chunks(state: AgentState) -> list[RetrievedChunk]:
@@ -153,7 +184,7 @@ async def rewrite(state: AgentState, runtime: Ctx) -> dict[str, Any]:
         log.warning("rewrite_failed", error=type(exc).__name__)
         return update
     lines = [line.strip(" \"'`") for line in _text(reply).strip().splitlines() if line.strip()]
-    if lines:
+    if lines and not _hit_length_limit(reply):  # a rewrite cut by the cap is not a usable query
         update["query"] = lines[0][:MAX_QUERY_CHARS]
     update["usage"] = _add_usage(state.get("usage", {}), reply)
     return update
@@ -263,19 +294,23 @@ async def answer(state: AgentState, runtime: Ctx) -> dict[str, Any]:
         return {"answer": message, "trace": trace}
     _emit("status", text="Writing the answer…")
     registry = Registry.from_sources(chunks, web)
-    messages: list[BaseMessage] = [
-        SystemMessage(content=prompts.build_system_prompt(ctx.module_path)),
-        *trim_history(state.get("messages", [])),
-        HumanMessage(
-            content=prompts.build_answer_human(
-                state["question"], registry.pairs(), registry.web_pairs(), _web_note(status)
-            )
-        ),
-    ]
+    pairs = registry.pairs()
+    messages = prompts.build_answer_messages(
+        ctx.module_path,
+        trim_history(state.get("messages", [])),
+        state["question"],
+        pairs,
+        registry.web_pairs(),
+        _web_note(status),
+        overlap.model_texts([chunk for _, chunk in pairs], ctx.settings.retrieval_llm_chars),
+        cache=ctx.settings.llm_prompt_cache and ctx.models.provider == "anthropic",
+    )
     parts: list[str] = []
     final: AIMessageChunk | None = None
+    truncated = False
     async for piece in ctx.models.main.astream(messages):
         final = piece if final is None else final + piece
+        truncated = truncated or _hit_length_limit(piece)
         text = piece.text
         if text:
             parts.append(text)
@@ -286,6 +321,7 @@ async def answer(state: AgentState, runtime: Ctx) -> dict[str, Any]:
         _emit("token", text=final_text)
     return {
         "answer": final_text,
+        "truncated": truncated,
         "usage": _add_usage(state.get("usage", {}), final),
         "trace": trace,
     }
@@ -293,17 +329,22 @@ async def answer(state: AgentState, runtime: Ctx) -> dict[str, Any]:
 
 async def validate_citations_node(state: AgentState, runtime: Ctx) -> dict[str, Any]:
     registry = Registry.from_sources(_chunks(state), _web_results(state))
-    checked = validate_citations(state.get("answer", ""), registry)
+    truncated = bool(state.get("truncated"))
+    answer_text = state.get("answer", "")
+    if truncated:  # never show a marker cut in half
+        answer_text = strip_partial_marker(answer_text)
+    checked = validate_citations(answer_text, registry)
     stored = [
         HumanMessage(content=state["question"]),
         AIMessage(content=strip_markers(checked.text)),
     ]
+    shown = checked.text + "\n\n" + prompts.LENGTH_NOTE if truncated else checked.text
     # Keep the checkpointed memory bounded: drop the oldest messages beyond the cap.
     existing = state.get("messages", [])
     overflow = max(0, len(existing) + len(stored) - HISTORY_STORE_MAX_MESSAGES)
     removals = [RemoveMessage(id=m.id) for m in existing[:overflow] if m.id]
     return {
-        "answer": checked.text,
+        "answer": shown,
         "citations": cited_payloads(registry, checked.cited),
         "dropped_markers": checked.dropped,
         "used_web": any(m in registry.web for m in checked.cited),

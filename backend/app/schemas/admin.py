@@ -42,6 +42,8 @@ class DayTokens(BaseModel):
     input_tokens: int
     output_tokens: int
     total_tokens: int
+    cache_read_tokens: int = 0  # input tokens served from the provider's prompt cache
+    cache_creation_tokens: int = 0  # input tokens written to the prompt cache
 
 
 class UserUsage(BaseModel):

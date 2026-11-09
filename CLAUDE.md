@@ -155,7 +155,7 @@ SSE event types (keep this contract stable; the page JS depends on it): `status`
 
 ## 8. Retrieval: rules
 
-- **Hybrid search**: sqlite-vec cosine top-k (20) + FTS5 `bm25` top-k (20), fused with **Reciprocal Rank Fusion** (k=60), optionally reranked, then the top `RETRIEVAL_TOP_K` (default 8) go to the LLM. The query is sanitised before FTS5 (each token double-quoted; no raw user input in `MATCH` syntax). vec0 KNN cannot join-filter, so the vector query is `... WHERE embedding MATCH ? AND k = ? AND rowid IN (SELECT seq FROM chunks JOIN documents ... WHERE <scope> AND documents.status = 'ready')`; the FTS query uses the same predicate. Scope is enforced inside both queries, never by post-filtering a global top-k.
+- **Hybrid search**: sqlite-vec cosine top-k (20) + FTS5 `bm25` top-k (20), fused with **Reciprocal Rank Fusion** (k=60), optionally reranked, then the top `RETRIEVAL_TOP_K` (default 6) go to the LLM, each cut to `RETRIEVAL_LLM_CHARS` (default 1000) at a word boundary; the text duplicated by chunk overlap between consecutive chunks of one document is removed from what the model sees (the stored text and citations are unchanged). The query is sanitised before FTS5 (each token double-quoted; no raw user input in `MATCH` syntax). vec0 KNN cannot join-filter, so the vector query is `... WHERE embedding MATCH ? AND k = ? AND rowid IN (SELECT seq FROM chunks JOIN documents ... WHERE <scope> AND documents.status = 'ready')`; the FTS query uses the same predicate. Scope is enforced inside both queries, never by post-filtering a global top-k.
 - **Tiered scope**: `module`, `block` or `all`. Chat searches the selected module first, then widens to its block, then all material; only after the last tier is insufficient may it go to the web. A chat on "All material" has one tier.
 - **The access filter is mandatory** and is built only in `retrieval/access.py`. Today it requires an authenticated, active user and nothing more. It is applied inside the SQL (scope, `documents.status = 'ready'` and the access predicate are all in the `WHERE`), never afterwards in Python. The LLM never supplies scope or user identity; tools get them through LangGraph's runtime context, not tool arguments.
 - Optional filters: `week`, `document_id`.
@@ -172,7 +172,7 @@ SSE event types (keep this contract stable; the page JS depends on it): `status`
 - **Citations** (`agent/citations.py`): build a registry `{"C1": RetrievedChunk, "W1": WebResult, …}` before generation and pass numbered sources to the LLM. After generation parse the markers, drop or flag any not in the registry, and return only the sources actually cited.
 - **Web search**: only when all material tiers are insufficient, only if `modules.web_search_enabled` is true for the module (for "All material" chats the global provider setting decides), at most `WEB_MAX_QUERIES` (default 2) per turn; restrict to `WEB_ALLOWED_DOMAINS` when set; keep only `http(s)` URLs; record URL, title, snippet and retrieval time; never send the user's identity or document content to the provider, only the query.
 - **Memory**: `thread_id = conversation.id` with the SQLite checkpointer; trim or summarise history to fit the context window.
-- **Models**: `LLM_PROVIDER`, `LLM_MODEL`, and a cheaper `LLM_FAST_MODEL` for rewriting and sufficiency checks. Defaults: `anthropic` → `claude-sonnet-5-5` / `claude-haiku-5-5`; `gemini` → `gemini-2.5-flash` for both. Names are configurable; check them against the provider's current catalogue.
+- **Models**: `LLM_PROVIDER`, `LLM_MODEL`, and a cheaper `LLM_FAST_MODEL` for rewriting and sufficiency checks. Defaults: `anthropic` → `claude-sonnet-5-5` / `claude-haiku-5-5`; `gemini` → `gemini-2.5-flash` for both. Names are configurable; check them against the provider's current catalogue. Output is capped by `LLM_MAX_OUTPUT_TOKENS` (answer) and `LLM_FAST_MAX_OUTPUT_TOKENS`; an answer cut by the limit gets a short note. The answer prompt is ordered for caching: system message, history, then one human message with sources and the question; with `LLM_PROMPT_CACHE` (Anthropic only) the system block and the last history message carry `cache_control: ephemeral`, and cache token counts go to `messages.token_usage`.
 - **Provider interface**: `llm/factory.py` returns a chat model and raises a typed `ProviderNotConfigured` when the key is missing. A local provider means adding one module, not changing callers. `fake` is for tests only.
 - Stream tokens. Time out the whole turn after `AGENT_TIMEOUT_S` (default 60).
 
@@ -362,6 +362,9 @@ MODULES_PER_BLOCK=3
 LLM_PROVIDER=anthropic              # anthropic | gemini  (fake is for tests only)
 LLM_MODEL=claude-sonnet-5-5         # gemini default: gemini-2.5-flash
 LLM_FAST_MODEL=claude-haiku-5-5     # gemini default: gemini-2.5-flash
+LLM_MAX_OUTPUT_TOKENS=1024          # cap on the length of an answer (64-16000)
+LLM_FAST_MAX_OUTPUT_TOKENS=256      # cap for query rewriting and sufficiency checks (16-2000)
+LLM_PROMPT_CACHE=true               # Anthropic prompt caching; no effect on other providers
 ANTHROPIC_API_KEY=
 GOOGLE_API_KEY=                     # Gemini chat and Gemini embeddings
 
@@ -376,7 +379,8 @@ TAVILY_API_KEY=
 WEB_MAX_QUERIES=2
 WEB_ALLOWED_DOMAINS=                # optional comma-separated allow-list
 
-RETRIEVAL_TOP_K=8
+RETRIEVAL_TOP_K=6
+RETRIEVAL_LLM_CHARS=1000            # characters of each passage the model sees (200-4000); the viewer shows the full text
 RETRIEVAL_MIN_SCORE=0.0             # min cosine similarity 0-1 of the best hit for a tier to count as sufficient; 0 = off; try 0.3-0.5 (tune with evals)
 RETRIEVAL_MIN_HITS=1
 RERANK_ENABLED=false
