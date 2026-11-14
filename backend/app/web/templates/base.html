@@ -7,9 +7,9 @@
   <meta name="htmx-config" content='{"allowEval": false, "includeIndicatorStyles": false}'>
   {% if csrf_token %}<meta name="csrf-token" content="{{ csrf_token }}">{% endif %}
   <title>{% block title %}CoursePilot{% endblock %}</title>
-  <link rel="stylesheet" href="/static/css/app.css">
-  <script src="/static/js/theme.js"></script>
-  <script src="/static/htmx.min.js" defer></script>
+  <link rel="stylesheet" href="{{ static_url('css/app.css') }}">
+  <script src="{{ static_url('js/theme.js') }}"></script>
+  <script src="{{ static_url('htmx.min.js') }}" defer></script>
 </head>
 <body class="{% block body_class %}{% endblock %}"{% if user and csrf_token %} hx-headers='{{ {"X-CSRF-Token": csrf_token} | tojson }}'{% endif %}>
   {% include "_icons.html" %}
@@ -41,7 +41,7 @@
     <button type="button" class="icon-btn theme-toggle" data-theme-toggle aria-pressed="false" aria-label="Dark theme"><svg class="i sun"><use href="#sun"/></svg><svg class="i moon"><use href="#moon"/></svg></button>
     {% if user %}
     <details class="usermenu">
-      <summary aria-label="Account menu"><span class="avatar" aria-hidden="true">{{ ((user.display_name.split() | map("first") | join)[:2] | upper) or "?" }}</span><span class="user-name">{{ user.display_name }}</span></summary>
+      <summary aria-label="Account menu, {{ user.display_name }}" title="{{ user.display_name }}"><span class="avatar" aria-hidden="true">{{ ((user.display_name.split() | map("first") | join)[:2] | upper) or "?" }}</span><span class="user-name">{{ user.display_name }}</span></summary>
       <div class="usermenu-panel">
         <p class="who"><strong>{{ user.display_name }}</strong> <span class="badge">{{ user.role.value }}</span></p>
         <p><a href="/change-password">Change password</a></p>

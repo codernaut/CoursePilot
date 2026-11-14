@@ -31,3 +31,9 @@ Thumbs.db
 
 # Test reports
 backend/reports/
+
+# Generated user manual outputs and the screenshot demo (see docs/manual, scripts/manual_demo.py)
+docs/manual/*.pdf
+docs/manual/*.docx
+docs/manual/*.html
+.manual-demo/

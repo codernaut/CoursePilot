@@ -56,6 +56,10 @@ cd backend
 uv run ruff check . && uv run ruff format --check . && uv run mypy app tests ../scripts/build_release.py && uv run pytest
 ```
 
+## User manual
+
+The user manual is [docs/manual/CoursePilot-User-Manual.md](docs/manual/CoursePilot-User-Manual.md) (screenshots in `docs/manual/img`). To build the DOCX, HTML and PDF versions (needs [pandoc](https://pandoc.org); the PDF also needs Edge, Chrome or Chromium): `python scripts/build_manual.py`. The outputs are not committed.
+
 ## Versions and releases
 
 CoursePilot follows [SemVer](https://semver.org/) and stays on `0.x` while it is in development (`-rc.N` for pre-releases). The version lives in `backend/pyproject.toml`; the running version and git commit are shown in the page footer and at `GET /api/v1/health/version`.

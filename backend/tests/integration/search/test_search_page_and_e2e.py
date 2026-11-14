@@ -50,7 +50,9 @@ async def test_search_page_renders_for_every_role(
     assert 'href="/search"' in html  # nav link
     assert 'id="passage-panel"' in html and 'role="dialog"' in html and 'aria-modal="true"' in html
     assert 'id="passage-close"' in html and 'aria-live="polite"' in html
-    assert '<script src="/static/js/passage_panel.js" defer></script>' in html
+    assert re.search(
+        r'<script src="/static/js/passage_panel\.js\?v=[0-9a-f]{12}" defer></script>', html
+    )
     assert not re.search(r"<script(?![^>]*\bsrc=)", html)  # no inline scripts
     assert "No matching passages" not in html  # nothing searched yet
 

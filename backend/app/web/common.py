@@ -1,5 +1,7 @@
 """Helpers shared by the HTML page routes."""
 
+import hashlib
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -23,11 +25,26 @@ def human_size(size: int) -> str:
     return f"{value:.1f} GB"
 
 
+@lru_cache(maxsize=64)
+def _fingerprint(path: str, mtime_ns: int) -> str:
+    return hashlib.sha256((STATIC_DIR / path).read_bytes()).hexdigest()[:12]
+
+
+def static_url(path: str) -> str:
+    """``/static/<path>?v=<content hash>``: the URL changes whenever the file changes, so
+    browsers never keep a stale stylesheet or script after an upgrade."""
+    file = (STATIC_DIR / path).resolve()
+    if not file.is_relative_to(STATIC_DIR.resolve()) or not file.is_file():
+        raise ValueError(f"unknown static file: {path}")
+    return f"/static/{path}?v={_fingerprint(path, file.stat().st_mtime_ns)}"
+
+
 def make_templates() -> Jinja2Templates:
     # Jinja2Templates enables autoescape for .html templates. Never mark user, document or
     # model text as safe in a template.
     templates = Jinja2Templates(directory=str(WEB_DIR / "templates"))
     templates.env.filters["filesize"] = human_size
+    templates.env.globals["static_url"] = static_url
     return templates
 
 

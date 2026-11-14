@@ -43,7 +43,8 @@ def assert_strict_markup(html: str, where: str) -> None:
 def assert_theme_controls(html: str) -> None:
     head = html.split("</head>")[0]
     scripts = re.findall(r"<script\b[^>]*>", head)
-    assert scripts[0] == '<script src="/static/js/theme.js">'  # first, not deferred
+    # First, not deferred (the ?v= fingerprint is checked in its own test).
+    assert re.fullmatch(r'<script src="/static/js/theme\.js\?v=[0-9a-f]{12}">', scripts[0])
     assert "data-theme-toggle" in html and 'aria-label="Dark theme"' in html
     assert 'aria-pressed="false"' in html
     for accent in ("crimson", "coral", "plum", "teal", "ocean"):
@@ -256,6 +257,36 @@ def test_topbar_collapses_before_the_admin_nav_can_overflow() -> None:
     assert "flex-wrap: wrap" in _css_block(css, "\n.nav ul {")
 
 
+def test_user_chip_never_wraps_the_top_bar() -> None:
+    css = (STATIC / "css" / "app.css").read_text(encoding="utf-8")
+    assert "flex: none" in _css_block(css, "\n.usermenu {")
+    name = _css_block(css, "\n.user-name {")
+    assert "max-width: 12rem" in name and "text-overflow: ellipsis" in name
+    assert "white-space: nowrap" in name
+    hidden = _css_block(css, "@media (min-width: 1280px) and (max-width: 1439px) {")
+    assert ".user-name" in hidden and "display: none" in hidden
+
+
+def test_every_text_input_gets_the_field_style() -> None:
+    css = (STATIC / "css" / "app.css").read_text(encoding="utf-8")
+    # inputs without a type attribute (the structure page) default to text and must match too
+    assert 'input:not([type]),\ninput[type="text"]' in css
+    for kind in ("email", "password", "number", "search"):
+        assert f'input[type="{kind}"]' in css
+    templates = Path(__file__).resolve().parents[2] / "app" / "web" / "templates"
+    styled = {"text", "email", "password", "number", "search", "url", "hidden", "file", "checkbox"}
+    for path in templates.glob("*.html"):
+        for tag in re.findall(r"<input\b[^>]*>", path.read_text(encoding="utf-8")):
+            m = re.search(r'type="(\w+)"', tag)
+            assert m is None or m.group(1) in styled, (path.name, tag)
+
+
+async def test_user_chip_has_the_full_name_accessibly(make_actor: ActorFactory) -> None:
+    actor = await make_actor(Role.ADMIN)
+    page = await actor.client.get("/")
+    assert 'aria-label="Account menu, ' in page.text and "<summary" in page.text
+
+
 def test_usage_chart_scrolls_instead_of_shrinking_on_phones() -> None:
     html = render_usage([DayMessages(day="2026-11-01", questions=1, answers=1)])
     assert 'class="chart-scroll"' in html and 'tabindex="0"' in html
@@ -272,3 +303,27 @@ def test_usage_chart_survives_huge_numbers() -> None:
     )
     for value in re.findall(r'<rect[^>]*?(?:x|y|width|height)="([^"]*)"', html):
         assert float(value) == float(value) and abs(float(value)) < 10**6, value
+
+
+async def test_static_assets_are_fingerprinted_so_upgrades_are_not_cached(
+    client: AsyncClient,
+) -> None:
+    """Every stylesheet and script link carries ?v=<content hash>, and the hash is the
+    current file's, so a browser cannot keep a stale copy after an upgrade."""
+    import hashlib
+
+    from app.web.common import STATIC_DIR, static_url
+
+    html = (await client.get("/login")).text
+    links = re.findall(r'(?:href|src)="(/static/[^"]+)"', html)
+    assert links
+    for link in links:
+        path, _, version = link.removeprefix("/static/").partition("?v=")
+        assert version, f"unversioned asset: {link}"
+        expected = hashlib.sha256((STATIC_DIR / path).read_bytes()).hexdigest()[:12]
+        assert version == expected
+        assert (await client.get(link)).status_code == 200
+    with pytest.raises(ValueError, match="unknown static file"):
+        static_url("../app.css")
+    with pytest.raises(ValueError, match="unknown static file"):
+        static_url("css/missing.css")

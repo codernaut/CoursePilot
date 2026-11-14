@@ -147,7 +147,9 @@ async def test_pages_have_no_inline_scripts_or_handlers(
         assert event_handlers(html) == [], path
         assert "javascript:" not in html
     page_html = await page(actor, module)
-    assert '<script src="/static/js/materials.js" defer></script>' in page_html
+    assert re.search(
+        r'<script src="/static/js/materials\.js\?v=[0-9a-f]{12}" defer></script>', page_html
+    )
     csp = (await actor.client.get(f"/modules/{module.id}/materials")).headers[
         "content-security-policy"
     ]

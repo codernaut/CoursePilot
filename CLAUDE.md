@@ -87,7 +87,7 @@ Choose these unless a decision in this file is explicitly changed. Nothing here 
 
 ## 4. Repository layout
 
-Top level: `CLAUDE.md`, `README.md`, `LICENSE`, `.env.example` (every env var; the real `.env` is at the repo root), `setup.*` / `start.*`, `THIRD_PARTY_NOTICES.md`, `VERSION` (release zips only), `deploy/` (systemd, Caddy, Windows tasks, Litestream, Cloudflare Tunnel examples), `scripts/build_release.py`, `.github/workflows/` (`ci.yml`, `release.yml`), `data/` (gitignored, `DATA_DIR`), `docs/` (`architecture.md`, `deploy.md`, `decisions/` with ADRs `NNNN-title.md` and `history.md`, the per-milestone decision log), `backend/`.
+Top level: `CLAUDE.md`, `README.md`, `LICENSE`, `.env.example` (every env var; the real `.env` is at the repo root), `setup.*` / `start.*`, `THIRD_PARTY_NOTICES.md`, `VERSION` (release zips only), `deploy/` (systemd, Caddy, Windows tasks, Litestream, Cloudflare Tunnel examples), `scripts/build_release.py`, `scripts/build_manual.py` and `scripts/manual_demo.py` (rebuild the manual; throwaway demo for its screenshots), `.github/workflows/` (`ci.yml`, `release.yml`), `data/` (gitignored, `DATA_DIR`), `docs/` (`architecture.md`, `deploy.md`, `manual/` (user manual source `CoursePilot-User-Manual.md`, `manual.css`, `img/` screenshots), `decisions/` with ADRs `NNNN-title.md` and `history.md`, the per-milestone decision log), `backend/`.
 
 `backend/`: `pyproject.toml`, `uv.lock`, `alembic.ini`, `migrations/`, `app/`, `tests/` (`unit/`, `integration/`, `fixtures/`, `evals/`).
 
@@ -309,7 +309,7 @@ uv run python -m app.worker                 # processing worker
 uv run pytest                               # all tests
 uv run pytest tests/unit -k chunker         # a single area
 uv run python -m tests.evals.run            # retrieval quality with the configured real embedder (costs API calls)
-uv run ruff check . && uv run ruff format --check . && uv run mypy app tests ../scripts/build_release.py
+uv run ruff check . && uv run ruff format --check . && uv run mypy app tests ../scripts/build_release.py ../scripts/build_manual.py
 uv run pytest --junitxml=reports/junit.xml --cov=app --cov-report=html:reports/htmlcov   # what CI uploads
 
 # build a release zip locally (tag must match backend/pyproject.toml version; see "Releases" below)
@@ -317,6 +317,13 @@ python scripts/build_release.py --tag v0.1.0
 ```
 
 How `setup.*` installs uv (PEP 668 handling): docs/decisions/history.md ("Moved detail from CLAUDE.md §16").
+
+Rebuild the user manual (needs pandoc; the PDF also needs Edge, Chrome or Chromium; outputs are git-ignored) and start the screenshot demo (fake LLM, port 8767, data in `.manual-demo/`, never for real data):
+
+```bash
+backend/.venv/Scripts/python.exe scripts/build_manual.py [--pandoc PATH] [--browser PATH]   # docs/manual/*.{docx,html,pdf}
+backend/.venv/Scripts/python.exe scripts/manual_demo.py
+```
 
 ### Versioning
 
@@ -426,5 +433,6 @@ The `fake` provider values are accepted by `Settings` (so tests can select them)
 - **Fixtures**: use only material we wrote ourselves or that is public domain / openly licensed. Never commit real copyrighted course material.
 - **Dependencies** must be AGPL-compatible (§2) and pinned with compatible ranges. Check the licence before adding one.
 - **Ask the owner before** changing the stack in §3, adding a paid third-party service, changing the licence, or doing anything destructive to production data.
+- **User manual**: any change to a page's behaviour, labels or layout updates the matching section of `docs/manual/CoursePilot-User-Manual.md` and, when the page looks different, its screenshot (take it from `scripts/manual_demo.py` at 1280x800 or 1440x900, light theme). The generated PDF/DOCX/HTML are not committed.
 - **Keep docs current**: when you add an endpoint, env var, table or command, update this file and `docs/` in the same commit. Record each milestone's decisions in `docs/decisions/history.md` and keep §2 to one line per milestone.
 - **Read before changing**: before changing an area, read its milestone block in `docs/decisions/history.md`; it holds the exact behaviour and the reasoning behind past decisions.

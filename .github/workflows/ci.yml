@@ -44,7 +44,7 @@ jobs:
 
       - name: Mypy
         if: runner.os == 'Linux'
-        run: uv run mypy app tests ../scripts/build_release.py
+        run: uv run mypy app tests ../scripts/build_release.py ../scripts/build_manual.py
 
       - name: Tests
         run: >

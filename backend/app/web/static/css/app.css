@@ -270,9 +270,13 @@ label {
   font: 800 0.84rem var(--head);
   margin: 0.7rem 0 0.3rem 0.4rem;
 }
+input:not([type]),
 input[type="text"],
 input[type="email"],
 input[type="password"],
+input[type="number"],
+input[type="search"],
+input[type="url"],
 select,
 textarea {
   width: 100%;
@@ -506,6 +510,7 @@ html:not(.js) .menu-btn {
 .usermenu {
   order: 4;
   position: relative;
+  flex: none; /* the chip never wraps onto a second row */
 }
 .usermenu summary {
   list-style: none;
@@ -533,7 +538,7 @@ html:not(.js) .menu-btn {
 }
 .user-name {
   font-size: 0.88rem;
-  max-width: 10rem;
+  max-width: 12rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1854,6 +1859,16 @@ tbody tr + tr > * {
   }
   .doc .actions {
     grid-column: 2 / -1;
+  }
+}
+
+/* Between the collapse point and 1440px the admin bar has no room for the name: initials only. */
+@media (min-width: 1280px) and (max-width: 1439px) {
+  .user-name {
+    display: none;
+  }
+  .usermenu summary {
+    padding-right: 0.2rem;
   }
 }
 
