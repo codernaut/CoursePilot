@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     llm_max_output_tokens: int = Field(1024, ge=64, le=16000)  # the answer
     llm_fast_max_output_tokens: int = Field(256, ge=16, le=2000)  # rewrite and judge calls
     llm_prompt_cache: bool = True  # Anthropic prompt caching (no effect on other providers)
+    # Anthropic effort (thinking depth and token spend); "" sends none (the model default).
+    llm_effort: Literal["", "low", "medium", "high", "xhigh", "max"] = "low"
     anthropic_api_key: SecretStr | None = None
     google_api_key: SecretStr | None = None
 

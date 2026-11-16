@@ -48,6 +48,42 @@ def test_anthropic_models_are_built_with_the_configured_names(tmp_path: Path) ->
     assert models.main_name == "some-future-sonnet" and models.provider == "anthropic"
 
 
+def test_anthropic_models_send_no_temperature_and_the_configured_effort(tmp_path: Path) -> None:
+    """Claude Sonnet 5.5 / Haiku 5.5 reject any non-default temperature with a 400 (seen in
+    production: 'temperature: Extra inputs are not permitted'), so none may be sent; effort
+    keeps adaptive thinking from eating the output caps."""
+    from langchain_anthropic import ChatAnthropic
+
+    models = build_chat_models(
+        settings_for(tmp_path, llm_provider="anthropic", anthropic_api_key="dummy-key")
+    )
+    for model in (models.main, models.fast):
+        assert isinstance(model, ChatAnthropic)
+        assert model.temperature is None
+        assert model.output_config == {"effort": "low"}
+        params = model._get_request_payload([HumanMessage("hi")])
+        assert "temperature" not in params and "top_p" not in params
+        assert params["output_config"] == {"effort": "low"}
+
+
+def test_an_empty_effort_sends_no_output_config(tmp_path: Path) -> None:
+    from langchain_anthropic import ChatAnthropic
+
+    models = build_chat_models(
+        settings_for(tmp_path, llm_provider="anthropic", anthropic_api_key="k", llm_effort="")
+    )
+    assert isinstance(models.main, ChatAnthropic)
+    assert "output_config" not in models.main._get_request_payload([HumanMessage("hi")])
+
+
+def test_gemini_keeps_its_temperatures(tmp_path: Path) -> None:
+    models = build_chat_models(
+        settings_for(tmp_path, llm_provider="gemini", google_api_key="dummy-key")
+    )
+    assert getattr(models.main, "temperature", None) == 0.2
+    assert getattr(models.fast, "temperature", None) == 0.0
+
+
 def test_gemini_models_are_built_and_share_google_api_key(tmp_path: Path) -> None:
     from langchain_google_genai import ChatGoogleGenerativeAI
 

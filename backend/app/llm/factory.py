@@ -84,11 +84,19 @@ def build_chat_models(settings: Settings) -> ChatModels:
 
     def make(model: str, *, max_tokens: int, temperature: float) -> BaseChatModel:
         options: dict[str, Any] = {limit_name: max_tokens}
+        if settings.llm_provider == "anthropic":
+            # Current Claude models (Sonnet 5.5, Haiku 5.5, Opus 5.5...) reject any non-default
+            # sampling parameter with a 400, so no ``temperature`` is sent. They think
+            # adaptively by default and thinking counts toward ``max_tokens``; ``effort`` keeps
+            # that thinking small for these short, grounded answers.
+            if settings.llm_effort:
+                options["output_config"] = {"effort": settings.llm_effort}
+        else:
+            options["temperature"] = temperature
         built: BaseChatModel = init_chat_model(
             model,
             model_provider=provider_id,
             api_key=key,
-            temperature=temperature,
             timeout=timeout,
             max_retries=MAX_RETRIES,
             **options,
