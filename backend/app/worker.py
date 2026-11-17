@@ -4,7 +4,8 @@ One loop does two things:
 
 * claims and runs queued jobs (``ingest_document``, ``reindex_document``, ``delete_document``) one
   at a time through ``JobRunner``; parsing and chunking run in a thread, embedding is async I/O;
-* periodic housekeeping: expired sessions, audit retention, stale upload temp files.
+* periodic housekeeping: expired sessions, ended guest access, audit retention, stale upload
+  temp files.
 
 Shutdown (Ctrl+C, SIGTERM, or ``stop`` being set): the running job gets a grace period to finish;
 otherwise it is cancelled and released back to the queue. A worker that is killed outright leaves a
@@ -23,6 +24,7 @@ import socket
 import time
 from collections.abc import Callable
 
+from app.agent.runtime import AgentRuntime
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
 from app.core.startup import warn_if_insecure_http
@@ -33,7 +35,7 @@ from app.ingestion.handlers import build_failure_hook, build_handlers, build_rel
 from app.ingestion.parser_pool import ParserPool
 from app.ingestion.pipeline import PipelineDeps
 from app.jobs import JobRunner, SqliteJobQueue
-from app.services import audit, auth
+from app.services import access_codes, audit, auth
 from app.storage import Storage, get_storage
 
 log = get_logger(__name__)
@@ -47,6 +49,20 @@ SHUTDOWN_GRACE_S = 20.0
 async def purge_once(database: Database) -> int:
     async with database.session() as session:
         return await auth.purge_expired_sessions(session)
+
+
+async def purge_guests_once(database: Database, settings: Settings) -> access_codes.GuestPurge:
+    """Guest sessions of ended codes, then (after a grace period) the guests' chats and accounts."""
+    async with database.session() as session:
+        purged = await access_codes.purge_ended_guests(session)
+    if purged.thread_ids:
+        runtime = AgentRuntime(settings)
+        for thread_id in purged.thread_ids:
+            try:
+                await runtime.delete_thread(thread_id)
+            except Exception as exc:  # the thread may never have been created
+                log.warning("guest_thread_delete_failed", error=type(exc).__name__)
+    return purged
 
 
 async def purge_audit_once(database: Database, settings: Settings) -> int:
@@ -127,6 +143,16 @@ async def run_worker(
                         log.info("expired_sessions_purged", count=purged)
                 except Exception as exc:  # keep the worker alive; the next tick retries
                     log.warning("purge_failed", error=type(exc).__name__)
+                try:
+                    purged_guests = await purge_guests_once(database, settings)
+                    if purged_guests.sessions or purged_guests.guests:
+                        log.info(
+                            "guest_access_purged",
+                            sessions=purged_guests.sessions,
+                            guests=purged_guests.guests,
+                        )
+                except Exception as exc:
+                    log.warning("guest_purge_failed", error=type(exc).__name__)
                 try:
                     swept = await sweep_storage_once(storage)
                     if swept:

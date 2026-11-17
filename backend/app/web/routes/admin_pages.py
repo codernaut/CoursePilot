@@ -39,7 +39,7 @@ async def _users_page(
         "admin_users.html",
         {
             "users": await users.list_users(db, ctx.user),
-            "roles": list(Role),
+            "roles": [r for r in Role if r != Role.GUEST],
             "error": error,
             "notice": notice,
             "temporary": temporary,

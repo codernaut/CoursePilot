@@ -71,6 +71,15 @@ def route_table(ids: dict[str, str]) -> list[Route]:
             {"feedback": "up"},
             expected=(401, 404, 404, 404),
         ),
+        # Temporary module access codes: faculty and admins only.
+        Route(
+            "POST",
+            f"{api}/modules/{m}/access-codes",
+            {"duration_hours": 4},
+            expected=(401, 403, 201, 201),
+        ),
+        Route("GET", f"{api}/modules/{m}/access-codes", expected=(401, 403, 200, 200)),
+        Route("POST", f"{api}/access-codes/{'0' * 32}/revoke", expected=(401, 403, 404, 404)),
         # Administrator operations (admin only; a retry of an unknown job is 404 for the admin).
         Route("GET", f"{api}/admin/jobs", expected=(401, 403, 403, 200)),
         Route("GET", f"{api}/admin/jobs?status=failed&limit=5", expected=(401, 403, 403, 200)),
@@ -101,6 +110,19 @@ def route_table(ids: dict[str, str]) -> list[Route]:
             f"/modules/{m}/materials/{d}/delete",
             form=True,
             expected=(anon_page, 403, 303, 403),
+        ),
+        Route(
+            "POST",
+            f"/modules/{m}/access-codes",
+            {"duration_hours": "4", "label": "Revision"},
+            form=True,
+            expected=(anon_page, 403, 200, 200),
+        ),
+        Route(
+            "POST",
+            f"/modules/{m}/access-codes/{'0' * 32}/revoke",
+            form=True,
+            expected=(anon_page, 403, 404, 404),
         ),
         Route("GET", "/docs", expected=(anon_page, 200, 200, 200)),
         Route("GET", "/admin/users", expected=(anon_page, 403, 403, 200)),

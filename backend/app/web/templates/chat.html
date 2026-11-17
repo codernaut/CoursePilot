@@ -11,6 +11,12 @@
     <div class="field chat-scope">
       <p class="eyebrow">Pick a module</p>
       <label for="chat-module" class="visually-hidden">Ask about</label>
+      {% if guest_module %}
+      <select id="chat-module" disabled>
+        <option value="{{ guest_module.id }}" selected>{{ guest_module.title }}</option>
+      </select>
+      <p class="muted">Your access code covers this module only.</p>
+      {% else %}
       <select id="chat-module"{% if current %} disabled{% endif %}>
         <option value="">All material</option>
         {% for year in years %}
@@ -23,7 +29,8 @@
         {% endfor %}
         {% endfor %}
       </select>
-      {% if current %}<p class="muted">This conversation is about {{ current.module_path or "all material" }}.</p>{% endif %}
+      {% endif %}
+      {% if current and not guest_module %}<p class="muted">This conversation is about {{ current.module_path or "all material" }}.</p>{% endif %}
     </div>
 
     <div class="chat-convs">

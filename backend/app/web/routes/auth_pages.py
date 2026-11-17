@@ -6,12 +6,14 @@ from fastapi import APIRouter, Depends, Form, Request
 from starlette.responses import RedirectResponse, Response
 
 from app.api.deps import (
+    AnySession,
     CurrentUser,
     CurrentUserAllowPending,
     DbDep,
     SettingsDep,
     clear_session_cookie,
     client_ip,
+    get_guest_throttle,
     get_password_throttle,
     get_session_token,
     get_throttle,
@@ -19,19 +21,28 @@ from app.api.deps import (
     verify_login_request,
 )
 from app.core.errors import AppError
-from app.services import auth, structure
+from app.services import access_codes, auth, structure
 from app.services.security import make_login_token
 from app.web.common import render
 
 router = APIRouter(include_in_schema=False)
 
 ThrottleDep = Annotated[auth.LoginThrottle, Depends(get_throttle)]
+GuestThrottleDep = Annotated[auth.LoginThrottle, Depends(get_guest_throttle)]
 PasswordThrottleDep = Annotated[auth.LoginThrottle, Depends(get_password_throttle)]
 
 
 @router.get("/login")
 async def login_page(request: Request, settings: SettingsDep) -> Response:
-    return render(request, "login.html", {"csrf_token": make_login_token(settings), "error": None})
+    return render(
+        request,
+        "login.html",
+        {
+            "csrf_token": make_login_token(settings),
+            "error": None,
+            "access_ended": request.query_params.get("access_ended") == "1",
+        },
+    )
 
 
 @router.post("/login")
@@ -69,8 +80,46 @@ async def login_submit(
     return response
 
 
+@router.post("/login/guest")
+async def guest_login_submit(
+    request: Request,
+    settings: SettingsDep,
+    db: DbDep,
+    throttle: GuestThrottleDep,
+    code: Annotated[str, Form()] = "",
+    name: Annotated[str, Form()] = "",
+) -> Response:
+    """Join a module with a temporary access code (no account)."""
+    await verify_login_request(request, settings)
+    try:
+        result = await access_codes.redeem(
+            db,
+            settings,
+            throttle,
+            code=code[:64],
+            name=name[:200],
+            ip=client_ip(request, settings),
+            user_agent=request.headers.get("user-agent"),
+            old_token=get_session_token(request, settings),
+        )
+    except AppError as exc:
+        return render(
+            request,
+            "login.html",
+            {
+                "csrf_token": make_login_token(settings),
+                "guest_error": exc.message,
+                "guest_name": name[:40],
+            },
+            status_code=exc.status_code,
+        )
+    response = RedirectResponse("/chat", status_code=303)
+    set_session_cookie(response, settings, result.token)
+    return response
+
+
 @router.post("/logout")
-async def logout_submit(settings: SettingsDep, db: DbDep, ctx: CurrentUserAllowPending) -> Response:
+async def logout_submit(settings: SettingsDep, db: DbDep, ctx: AnySession) -> Response:
     await auth.logout(db, ctx)
     response = RedirectResponse("/login", status_code=303)
     clear_session_cookie(response, settings)

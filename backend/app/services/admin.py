@@ -19,7 +19,7 @@ from app.core.errors import conflict, not_found
 from app.core.logging import redact_text
 from app.db.base import utcnow
 from app.models import Conversation, Document, Job, Message, User
-from app.models.enums import DocumentStatus, Feedback, JobStatus, JobType, MessageRole
+from app.models.enums import DocumentStatus, Feedback, JobStatus, JobType, MessageRole, Role
 from app.schemas.admin import (
     DayMessages,
     DayTokens,
@@ -200,12 +200,33 @@ async def usage(db: AsyncSession, settings: Settings, *, days: int = 30) -> Usag
             .select_from(Message)
             .join(Conversation, Conversation.id == Message.conversation_id)
             .join(User, User.id == Conversation.user_id)
-            .where(Message.role == MessageRole.USER, Message.created_at >= start)
+            .where(
+                Message.role == MessageRole.USER,
+                Message.created_at >= start,
+                User.role != Role.GUEST,
+            )
             .group_by(User.id)
             .order_by(func.count().desc(), User.email)
             .limit(TOP_USERS)
         )
     ).all()
+
+    guest_row = (
+        await db.execute(
+            select(
+                func.sum(case((Message.created_at >= today, 1), else_=0)),
+                func.count(),
+            )
+            .select_from(Message)
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .join(User, User.id == Conversation.user_id)
+            .where(
+                Message.role == MessageRole.USER,
+                Message.created_at >= start,
+                User.role == Role.GUEST,
+            )
+        )
+    ).one()
 
     answers = (
         await db.execute(
@@ -262,6 +283,8 @@ async def usage(db: AsyncSession, settings: Settings, *, days: int = 30) -> Usag
         storage_bytes=int(storage),
         web_answers=int(answers[1] or 0),
         total_answers=int(answers[0] or 0),
+        guest_messages_today=int(guest_row[0] or 0),
+        guest_messages_in_period=int(guest_row[1] or 0),
     )
 
 

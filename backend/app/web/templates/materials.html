@@ -33,6 +33,9 @@
 <p class="alert alert-info">All users of this site can see uploaded material.
   {% if user.role.value == "admin" %}Administrators manage users and the programme structure; only faculty upload material.{% else %}Only faculty upload material.{% endif %}</p>
 {% endif %}
+{% if can_share %}
+{% include "_access_codes.html" %}
+{% endif %}
 <p id="upload-status" class="visually-hidden" role="status" aria-live="polite"></p>
 
 <h2>Documents in {{ module.title }}</h2>

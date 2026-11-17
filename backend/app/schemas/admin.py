@@ -65,6 +65,10 @@ class UsageOut(BaseModel):
     storage_bytes: int  # size of all stored (non-deleting) documents
     web_answers: int  # answers in the period that used web search
     total_answers: int
+    # Messages of guests (temporary module access), counted together and without identity. Guest
+    # chats are deleted shortly after their code ends, so only recent ones are counted.
+    guest_messages_today: int = 0
+    guest_messages_in_period: int = 0
 
 
 class FeedbackItem(BaseModel):

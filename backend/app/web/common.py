@@ -1,6 +1,7 @@
 """Helpers shared by the HTML page routes."""
 
 import hashlib
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.responses import Response
 
 from app.core.version import version_label
+from app.db.base import utcnow
 
 WEB_DIR = Path(__file__).resolve().parent
 STATIC_DIR = WEB_DIR / "static"
@@ -39,12 +41,22 @@ def static_url(path: str) -> str:
     return f"/static/{path}?v={_fingerprint(path, file.stat().st_mtime_ns)}"
 
 
+def time_left(moment: datetime) -> str:
+    """'3 h 12 min' until ``moment`` (UTC), or 'less than a minute'."""
+    seconds = int((moment - utcnow()).total_seconds())
+    if seconds < 60:
+        return "less than a minute"
+    hours, minutes = divmod(seconds // 60, 60)
+    return f"{hours} h {minutes:02d} min" if hours else f"{minutes} min"
+
+
 def make_templates() -> Jinja2Templates:
     # Jinja2Templates enables autoescape for .html templates. Never mark user, document or
     # model text as safe in a template.
     templates = Jinja2Templates(directory=str(WEB_DIR / "templates"))
     templates.env.filters["filesize"] = human_size
     templates.env.globals["static_url"] = static_url
+    templates.env.globals["time_left"] = time_left
     return templates
 
 
@@ -58,6 +70,7 @@ def render(
     data: dict[str, Any] = {
         "user": getattr(request.state, "user", None),
         "csrf_token": getattr(request.state, "csrf_token", None),
+        "guest_access": getattr(request.state, "guest_access", None),
         "version_label": version_label(),
         "insecure_http": request.app.state.settings.allow_insecure_http
         and not request.app.state.settings.secure_cookies,

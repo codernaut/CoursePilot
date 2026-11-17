@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query, Request
 from starlette.responses import Response
 
-from app.api.deps import CurrentUser, DbDep, SettingsDep
+from app.api.deps import CurrentMember, DbDep, SettingsDep
 from app.core.errors import AppError
 from app.models.enums import Role
 from app.retrieval.access import AccessContext
@@ -22,15 +22,20 @@ async def search_page(
     request: Request,
     db: DbDep,
     settings: SettingsDep,
-    ctx: CurrentUser,
+    ctx: CurrentMember,
     q: Annotated[str, Query(max_length=2000)] = "",
     module_id: Annotated[str, Query(max_length=64)] = "",
     scope: Annotated[str, Query(max_length=16)] = "",
     week: Annotated[str, Query(max_length=60)] = "",
     widen: Annotated[str, Query(max_length=8)] = "",
 ) -> Response:
+    if ctx.access_code is not None:  # a guest searches its own module only
+        module_id, scope, widen = ctx.access_code.module_id, "module", ""
     context: dict[str, object] = {
-        "years": await structure.get_tree(db),
+        "guest_module": await structure.get_module(db, ctx.access_code.module_id)
+        if ctx.access_code
+        else None,
+        "years": [] if ctx.access_code else await structure.get_tree(db),
         "q": q,
         "module_id": module_id,
         "scope": scope or ("module" if module_id else "all"),

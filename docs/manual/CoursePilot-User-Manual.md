@@ -22,8 +22,9 @@ CoursePilot runs as a web site. Everyone signs in with an account created by an 
 | **Student** | Chat, search, read cited passages and download documents |
 | **Faculty** | Everything a student can, plus upload, delete and re-index material, and edit module titles, descriptions and the web-search setting |
 | **Administrator** | Everything a student can, plus manage users, rename years and blocks, and watch jobs and usage. Administrators do not upload material |
+| **Guest** (no account) | Joins with a temporary **module access code** from faculty or an administrator. Can chat, search and read cited passages in that one module until the code expires. Cannot download files or see anything else |
 
-> **Note.** Every signed-in user can search and read **all** uploaded material. There are no per-module permissions. Conversations, however, are private to their owner (not even administrators can open them).
+> **Note.** Every signed-in user with an account can search and read **all** uploaded material. There are no per-module permissions for accounts. Guests are the exception: they see only the one module their code was issued for. Conversations, however, are private to their owner (not even administrators can open them).
 
 > **About the screenshots.** The screenshots in this manual come from a demo installation with sample users (Dr. Amina Admin, Prof. Farah Khan and Sara Ahmed). The AI answers shown in them come from a test model and are **examples only**; real answers come from the AI provider you configure.
 
@@ -231,7 +232,7 @@ CoursePilot works on phones. On narrow screens the navigation moves behind a **m
 
 ## The top bar
 
-Across the top you see: **Home**, **Chat**, **Search**, **Materials** and **Programme** for everyone, plus **Users**, **Jobs** and **Usage** for administrators. At the right are the theme button and your name. The page footer shows the version and a link to change your password.
+Across the top you see: **Home**, **Chat**, **Search**, **Materials** and **Programme** for everyone with an account, plus **Users**, **Jobs** and **Usage** for administrators. Guests only see **Chat** and **Search**, and a badge with their module and the time their access ends. At the right are the theme button and your name. The page footer shows the version and a link to change your password.
 
 # For students
 
@@ -402,6 +403,30 @@ After fixing the cause, upload a corrected file, or press **Re-index** on the ca
 
 Faculty can rename modules; renaming years and blocks is for administrators.
 
+## Temporary access codes
+
+**Who: Faculty, Administrators.**
+
+**What it is for:** letting people without an account (for example visitors, external examiners or a revision session) chat with the assistant about **one module** for a limited time.
+
+![The Temporary access panel on a module's materials page, with the duration list, the label field and a freshly created code.](img/21-temporary-access-panel.jpg){width=100%}
+
+**Create a code**
+
+1. Open the module's **Materials** page (from **Materials**, or the **Temporary access** link on the module's card on the Home page).
+2. In **Temporary access**, choose how long the code is valid: **2, 4, 8, 10, 12 or 24 hours**. The period starts **now**, when you press the button, and ends for everyone at the same moment. A code created at 09:00 for 4 hours works until 13:00.
+3. Optionally type a **Label** (for example "Revision session") to recognise the code later.
+4. Press **Create access code**.
+5. The code appears in a large box, for example `ABCD-EFGH-JKM`, with the time it is valid until. Press **Copy code** and share it with your guests.
+
+> **The code is shown only once.** CoursePilot stores only a scrambled form of it. If you lose it, revoke it and create a new one.
+
+**What guests can and cannot do.** With the code a guest can chat with the assistant, search and open cited passages **in this module only**. Guests cannot download documents, see other modules, upload, or open any administration page. Their conversations are deleted about an hour after their access ends.
+
+**See and end codes.** The table under the form lists active codes and those that ended in the last few days: the label, the last four characters, who created it, whether it is active (with the time left), expired or revoked, and how many guests joined. To end a code early press **Revoke**, then **Yes, revoke the code**. Everyone who joined with it loses access immediately.
+
+**When time runs out.** Access also ends on its own at the expiry time: the next thing a guest does shows "Your temporary access has ended."
+
 # For administrators
 
 **Who: Administrators.**
@@ -461,10 +486,35 @@ Further down:
 
 - **Tokens per day and model**: how much text was sent to and produced by the AI, including **cached** tokens (cheaper repeated parts of prompts).
 - **Documents and jobs by status**, **storage used**, and how many answers used **web search**.
-- **Top users**: message counts by email (counts only, no content) with today's use against the daily limit.
+- **Top users**: message counts by email (counts only, no content) with today's use against the daily limit. Guests (people who joined with an access code) are not listed one by one; they appear together in a single **Guests (temporary access)** row with their combined message counts.
 - **Feedback**: answers rated **Not helpful** (or helpful), with the question and any comment.
 
 > **Privacy.** Conversations stay private to their owners. The feedback list shows a rated answer, its question and comment, but **not who rated it** and not the rest of the conversation.
+
+# For guests: joining with an access code
+
+**Who: Guests (no account).**
+
+## Joining with an access code
+
+Your instructor gives you a code such as `ABCD-EFGH-JKM`. Capital letters, small letters, spaces and dashes do not matter.
+
+![The sign-in page with the "Have a module access code?" card under the account sign-in.](img/22-login-guest-card.jpg){width=100%}
+
+1. Open the CoursePilot address you were given. Below the sign-in form find **Have a module access code?**
+2. Type the **Access code** and **Your name** (up to 40 characters; it is shown in the top bar and nowhere else).
+3. Press **Join with code**. You land on the Chat page.
+
+![The guest's chat page: a "Guest, module, until time" badge in the top bar and only Chat and Search in the menu.](img/23-guest-chat.jpg){width=100%}
+
+## What you can do
+
+- **Chat** with the assistant about the module named in the top bar. Answers come from that module's material and cite their sources; the module cannot be changed.
+- **Search** the module's material.
+- **Click a citation** such as `[C1]` to read the passage. As a guest you can read the passage but there is no link to open or download the document.
+- The top bar shows **Guest · module · until HH:MM** (in your own time zone). When that time passes, or the instructor ends the code, you are signed out and see "Your temporary access has ended."
+
+Your conversations are deleted shortly after your access ends. Copy anything you want to keep before then. To leave earlier, open the menu with your name and press **Log out**.
 
 # How answers are produced
 
@@ -505,11 +555,20 @@ Ask an administrator to use **Reset password** on the Users page. You will get a
 **Where are the logs?**
 When you use `start.bat` / `./start.sh`, logs appear in the terminal as structured lines (passwords, keys and prompts are not logged). Production services write to your service manager's logs; see `docs/deploy.md`.
 
+**A guest says "That access code is not valid or has expired."**
+The code was typed wrongly, has expired, or was revoked. For safety the message is the same in all three cases. Check the code (case, spaces and dashes do not matter), then ask faculty or an administrator for a new code if it still fails. After several wrong attempts in a minute you must wait a minute before trying again.
+
+**A guest sees "Your temporary access has ended."**
+The code expired or was revoked. Ask for a new code and join again; earlier conversations are not kept.
+
+**I lost the access code I just created.**
+Codes are shown only once. Open the module's Materials page, **Revoke** the old code and create a new one.
+
 **Can I see other people's conversations?**
 No. Conversations are private to their owner, even from administrators.
 
 **Why can everyone see uploaded files?**
-By design, every signed-in user can read all uploaded material. Only upload what you have the right to share.
+By design, every signed-in user with an account can read all uploaded material (guests only the one module of their code). Only upload what you have the right to share.
 
 # Glossary
 

@@ -103,8 +103,12 @@ def _page_redirect(request: Request, exc: AppError) -> Response | None:
     if request.url.path.startswith("/api/"):
         return None
     target = None
-    if exc.status_code == 401:
+    if exc.code == "access_ended":
+        target = "/login?access_ended=1"
+    elif exc.status_code == 401:
         target = "/login"
+    elif exc.status_code == 403 and exc.details.get("guest") and request.method == "GET":
+        target = "/chat"  # a guest asked for a page that is not part of temporary access
     elif exc.code == "password_change_required":
         target = "/change-password"
     if target is None:

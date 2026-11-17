@@ -84,6 +84,7 @@ def create_app(
     app.state.settings = settings
     app.state.database = database
     app.state.login_throttle = LoginThrottle(settings.login_rate_limit_per_min)
+    app.state.guest_throttle = LoginThrottle(settings.login_rate_limit_per_min)
     app.state.password_throttle = LoginThrottle(settings.login_rate_limit_per_min)
     app.state.templates = make_templates()
     app.state.storage = get_storage(settings)

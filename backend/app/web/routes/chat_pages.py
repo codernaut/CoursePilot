@@ -6,7 +6,7 @@ from fastapi import APIRouter, Query, Request
 from starlette.responses import Response
 
 from app.api.chat import get_runtime
-from app.api.deps import CurrentUser, DbDep
+from app.api.deps import CurrentMember, DbDep
 from app.core.errors import PROVIDER_NOT_CONFIGURED_MESSAGE
 from app.models import Message
 from app.models.enums import Role
@@ -19,7 +19,7 @@ router = APIRouter(include_in_schema=False)
 
 
 async def _page(
-    request: Request, db: DbDep, ctx: CurrentUser, conversation_id: str | None, module_id: str
+    request: Request, db: DbDep, ctx: CurrentMember, conversation_id: str | None, module_id: str
 ) -> Response:
     embedder: QueryEmbedder = request.app.state.query_embedder
     problem = chat_service.provider_problem(get_runtime(request), embedder)
@@ -38,12 +38,20 @@ async def _page(
     if conversation_id:
         current, messages = await chat_service.get_conversation(db, ctx.user, conversation_id)
     conversations = await chat_service.list_conversations(db, ctx.user)
-    selected = current.conversation.module_id if current else (module_id or None)
+    guest_module = (
+        await structure.get_module(db, ctx.access_code.module_id) if ctx.access_code else None
+    )
+    selected = (
+        guest_module.id
+        if guest_module
+        else (current.conversation.module_id if current else (module_id or None))
+    )
     return render(
         request,
         "chat.html",
         {
-            "years": await structure.get_tree(db),
+            "years": [] if guest_module else await structure.get_tree(db),
+            "guest_module": guest_module,
             "conversations": conversations,
             "current": current,
             "messages": messages,
@@ -58,7 +66,7 @@ async def _page(
 async def chat_new(
     request: Request,
     db: DbDep,
-    ctx: CurrentUser,
+    ctx: CurrentMember,
     module_id: Annotated[str, Query(max_length=64)] = "",
 ) -> Response:
     return await _page(request, db, ctx, None, module_id)
@@ -66,6 +74,6 @@ async def chat_new(
 
 @router.get("/chat/{conversation_id}")
 async def chat_existing(
-    conversation_id: str, request: Request, db: DbDep, ctx: CurrentUser
+    conversation_id: str, request: Request, db: DbDep, ctx: CurrentMember
 ) -> Response:
     return await _page(request, db, ctx, conversation_id, "")

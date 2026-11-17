@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request, Response
 from fastapi.responses import StreamingResponse
 
 from app.agent.runtime import AgentRuntime
-from app.api.deps import CurrentUser, DatabaseDep, DbDep, SettingsDep
+from app.api.deps import CurrentMember, DatabaseDep, DbDep, SettingsDep
 from app.llm.factory import ProviderNotConfigured
 from app.retrieval.query_embedding import QueryEmbedder
 from app.schemas.chat import (
@@ -75,7 +75,7 @@ async def chat(
     db: DbDep,
     database: DatabaseDep,
     settings: SettingsDep,
-    ctx: CurrentUser,
+    ctx: CurrentMember,
 ) -> StreamingResponse:
     """Ask a question about one module (``module_id``) or all material (``null``). The response
     is a stream of events: ``status`` (progress text), ``token`` (answer text), ``citations`` (the
@@ -138,12 +138,14 @@ def _conversation_out(view: chat_service.ConversationView) -> ConversationOut:
 
 
 @router.get("/conversations", response_model=list[ConversationOut])
-async def list_conversations(db: DbDep, ctx: CurrentUser) -> list[ConversationOut]:
+async def list_conversations(db: DbDep, ctx: CurrentMember) -> list[ConversationOut]:
     return [_conversation_out(v) for v in await chat_service.list_conversations(db, ctx.user)]
 
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationDetail)
-async def get_conversation(conversation_id: str, db: DbDep, ctx: CurrentUser) -> ConversationDetail:
+async def get_conversation(
+    conversation_id: str, db: DbDep, ctx: CurrentMember
+) -> ConversationDetail:
     view, messages = await chat_service.get_conversation(db, ctx.user, conversation_id)
     return ConversationDetail(
         **_conversation_out(view).model_dump(),
@@ -153,7 +155,7 @@ async def get_conversation(conversation_id: str, db: DbDep, ctx: CurrentUser) ->
 
 @router.delete("/conversations/{conversation_id}", status_code=204)
 async def delete_conversation(
-    conversation_id: str, request: Request, db: DbDep, ctx: CurrentUser
+    conversation_id: str, request: Request, db: DbDep, ctx: CurrentMember
 ) -> Response:
     thread_id = await chat_service.delete_conversation(db, ctx.user, conversation_id)
     await get_runtime(request).delete_thread(thread_id)
@@ -162,7 +164,7 @@ async def delete_conversation(
 
 @router.post("/messages/{message_id}/feedback", response_model=MessageOut)
 async def message_feedback(
-    message_id: str, body: FeedbackIn, db: DbDep, ctx: CurrentUser
+    message_id: str, body: FeedbackIn, db: DbDep, ctx: CurrentMember
 ) -> MessageOut:
     message = await chat_service.set_feedback(db, ctx.user, message_id, body.feedback, body.comment)
     return MessageOut.model_validate(message)

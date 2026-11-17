@@ -23,6 +23,7 @@ from app.services import structure
 from tests.conftest import make_settings
 
 EXPECTED_TABLES = {
+    "access_codes",
     "app_meta",
     "audit_log",
     "blocks",
@@ -31,6 +32,7 @@ EXPECTED_TABLES = {
     "chunks_fts",
     "conversations",
     "documents",
+    "guest_accounts",
     "jobs",
     "messages",
     "modules",
@@ -63,7 +65,7 @@ def test_migration_creates_everything_on_fresh_db(fresh: Settings, tmp_path: Pat
     conn = _sqlite(tmp_path / "test.db")
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert tables >= EXPECTED_TABLES
-    assert conn.execute("SELECT version_num FROM alembic_version").fetchone() == ("0002",)
+    assert conn.execute("SELECT version_num FROM alembic_version").fetchone() == ("0003",)
     meta = dict(conn.execute("SELECT key, value FROM app_meta"))
     assert meta == {
         "embedding_provider": fresh.embedding_provider,
@@ -331,3 +333,146 @@ def test_migration_0002_keeps_documents_and_chunks_in_both_directions(
         check.close()
     final = _sqlite(tmp_path / "test.db")
     assert final.execute("SELECT reindexing FROM documents").fetchone() == (0,)
+
+
+def test_migration_0003_guest_role_in_both_directions(fresh: Settings, tmp_path: Path) -> None:
+    """Upgrading widens the role check (existing users untouched, no table rebuild); a guest row
+    is accepted; downgrading removes guests and their data and restores the old check."""
+    _run_in_thread(upgrade_to_head, fresh)
+    _run_in_thread(command.downgrade, alembic_config(fresh), "0002")
+    conn = _sqlite(tmp_path / "test.db")
+    now = "2026-01-01 00:00:00.000000"
+    conn.execute("PRAGMA foreign_keys=ON")
+    insert = (
+        "INSERT INTO users (id, email, password_hash, display_name, role, is_active, "
+        "must_change_password, created_at, updated_at) "
+        f"VALUES (?, ?, 'h', 'N', ?, 1, 0, '{now}', '{now}')"
+    )
+    conn.execute(insert, ("u1", "a@x.edu", "faculty"))
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(insert, ("g1", "g@guest.invalid", "guest"))
+    conn.commit()
+    conn.close()
+
+    _run_in_thread(upgrade_to_head, fresh)
+    conn = _sqlite(tmp_path / "test.db")
+    conn.execute("PRAGMA foreign_keys=ON")
+    assert conn.execute("SELECT role FROM users WHERE id = 'u1'").fetchone() == ("faculty",)
+    conn.execute(insert, ("g1", "g@guest.invalid", "guest"))
+    conn.execute(
+        "INSERT INTO conversations (id, user_id, title, thread_id, created_at, updated_at) "
+        f"VALUES ('c1', 'g1', 'T', 'c1', '{now}', '{now}')"
+    )
+    conn.execute(
+        "INSERT INTO sessions (id, user_id, token_hash, csrf_token, expires_at, last_seen_at, "
+        f"created_at, updated_at) VALUES ('s1', 'g1', 'h', 'c', '{now}', '{now}', '{now}', '{now}')"
+    )
+    conn.execute(
+        "INSERT INTO audit_log (id, actor_id, action, details, created_at, updated_at) "
+        f"VALUES ('a1', 'g1', 'guest_redeemed', '{{}}', '{now}', '{now}')"
+    )
+    conn.commit()
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(insert, ("x", "x@x.edu", "janitor"))
+    conn.close()
+
+    _run_in_thread(command.downgrade, alembic_config(fresh), "0002")
+    conn = _sqlite(tmp_path / "test.db")
+    assert conn.execute("SELECT id FROM users").fetchall() == [("u1",)]
+    assert conn.execute("SELECT count(*) FROM conversations").fetchone() == (0,)
+    assert conn.execute("SELECT actor_id FROM audit_log").fetchone() == (None,)
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert not tables & {"access_codes", "guest_accounts"}
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(insert, ("g2", "g2@guest.invalid", "guest"))
+    conn.close()
+    _run_in_thread(upgrade_to_head, fresh)
+
+
+def test_migration_0003_upgrade_from_real_0002_database_with_data(
+    fresh: Settings, tmp_path: Path
+) -> None:
+    """Upgrade a database built by migrations 0001 -> 0002 (the owner's real path), populated
+    with users, documents, chunks, vec0 and FTS rows and a conversation: nothing is lost, the
+    integrity check passes, foreign keys stay enforced and guests become insertable."""
+    _run_in_thread(command.upgrade, alembic_config(fresh), "0002")
+    conn = _sqlite(tmp_path / "test.db")
+    users_sql = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'users'").fetchone()[0]
+    assert "'student')" in users_sql and "guest" not in users_sql
+    now = "2026-01-01 00:00:00.000000"
+    conn.execute(
+        "INSERT INTO users (id, email, password_hash, display_name, role, is_active, "
+        "must_change_password, created_at, updated_at) VALUES "
+        f"('u', 'f@x.edu', 'h', 'F', 'faculty', 1, 0, '{now}', '{now}')"
+    )
+    conn.execute(
+        "INSERT INTO years (id, number, title, created_at, updated_at) "
+        f"VALUES ('y', 1, 'Y', '{now}', '{now}')"
+    )
+    conn.execute(
+        "INSERT INTO blocks (id, year_id, number, title, created_at, updated_at) "
+        f"VALUES ('b', 'y', 1, 'B', '{now}', '{now}')"
+    )
+    conn.execute(
+        "INSERT INTO modules (id, block_id, number, title, description, web_search_enabled, "
+        f"created_at, updated_at) VALUES ('m', 'b', 1, 'M', '', 1, '{now}', '{now}')"
+    )
+    conn.execute(
+        "INSERT INTO documents (id, module_id, uploaded_by, title, original_filename, mime_type, "
+        "size_bytes, storage_key, content_sha256, status, created_at, updated_at) VALUES "
+        f"('d', 'm', 'u', 'T', 'f.md', 'text/markdown', 1, '{'0' * 32}', 'sha', 'ready', "
+        f"'{now}', '{now}')"
+    )
+    conn.execute(
+        "INSERT INTO chunks (id, document_id, module_id, block_id, year_id, ordinal, text, "
+        "embed_text, token_count, embedding_model, metadata, created_at, updated_at) VALUES "
+        f"('c', 'd', 'm', 'b', 'y', 0, 't', 'running fast', 1, 'mod', '{{}}', '{now}', '{now}')"
+    )
+    seq = conn.execute("SELECT seq FROM chunks WHERE id = 'c'").fetchone()[0]
+    conn.execute(
+        "INSERT INTO chunk_vectors(rowid, embedding) VALUES (?, ?)",
+        (seq, sqlite_vec.serialize_float32([1.0] + [0.0] * 15)),
+    )
+    conn.execute("INSERT INTO chunks_fts(rowid, embed_text) VALUES (?, 'running fast')", (seq,))
+    conn.execute(
+        "INSERT INTO conversations (id, user_id, title, thread_id, created_at, updated_at) "
+        f"VALUES ('cv', 'u', 'T', 'cv', '{now}', '{now}')"
+    )
+    conn.commit()
+    conn.close()
+
+    _run_in_thread(upgrade_to_head, fresh)
+
+    conn = _sqlite(tmp_path / "test.db")
+    assert conn.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
+    assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    for table in ("users", "documents", "chunks", "conversations", "chunk_vectors"):
+        assert conn.execute(f"SELECT count(*) FROM {table}").fetchone() == (1,), table
+    assert conn.execute(
+        "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH '\"run\"'"
+    ).fetchall() == [(seq,)]
+    knn = conn.execute(
+        "SELECT rowid FROM chunk_vectors WHERE embedding MATCH ? AND k = 1",
+        (sqlite_vec.serialize_float32([1.0] + [0.0] * 15),),
+    ).fetchall()
+    assert knn == [(seq,)]
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute(
+        "INSERT INTO users (id, email, password_hash, display_name, role, is_active, "
+        "must_change_password, created_at, updated_at) VALUES "
+        f"('g', 'g@guest.invalid', '!', 'G', 'guest', 1, 0, '{now}', '{now}')"
+    )
+    with pytest.raises(sqlite3.IntegrityError):  # foreign keys still enforced
+        conn.execute(
+            "INSERT INTO conversations (id, user_id, title, thread_id, created_at, updated_at) "
+            f"VALUES ('bad', 'nobody', 'T', 'bad', '{now}', '{now}')"
+        )
+    conn.rollback()
+    conn.close()
+    # A second upgrade is a no-op and a full down/up cycle still passes the integrity check.
+    _run_in_thread(upgrade_to_head, fresh)
+    _run_in_thread(command.downgrade, alembic_config(fresh), "0002")
+    conn = _sqlite(tmp_path / "test.db")
+    assert conn.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
+    assert conn.execute("SELECT count(*) FROM users").fetchone() == (1,)
+    conn.close()

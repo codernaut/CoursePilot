@@ -18,7 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.errors import AppError, validation_error
 from app.db.base import utcnow
-from app.models import User, UserSession
+from app.models import AccessCode, GuestAccount, User, UserSession
+from app.models.enums import Role
 from app.services import audit
 from app.services.password_policy import validate_password
 from app.services.security import (
@@ -50,7 +51,7 @@ class PasswordAuthProvider:
             verify_against_dummy(password)
             return None
         ok = verify_password(password, user.password_hash)
-        if not ok or not user.is_active:
+        if not ok or not user.is_active or user.role == Role.GUEST:  # guests have no password
             return None
         return user
 
@@ -128,6 +129,11 @@ class LoginResult:
 class SessionContext:
     session: UserSession
     user: User
+    access_code: AccessCode | None = None  # set for guests (the code they were admitted with)
+
+    @property
+    def is_guest(self) -> bool:
+        return self.user.role == Role.GUEST
 
 
 async def login(
@@ -176,8 +182,21 @@ async def login(
     return LoginResult(token=token, session=session, user=user)
 
 
+class GuestAccessEndedError(AppError):
+    """A guest's access code has expired or was revoked (checked on every request)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "access_ended",
+            "Your temporary access has ended.",
+            status_code=401,
+        )
+
+
 async def resolve_session(db: AsyncSession, token: str | None) -> SessionContext | None:
-    """The live session and its active user for a cookie token, or None."""
+    """The live session and its active user for a cookie token, or None. For a guest the access
+    code is re-checked here, so expiry and revocation apply to the very next request
+    (``GuestAccessEndedError``)."""
     if not token:
         return None
     row = (
@@ -190,7 +209,25 @@ async def resolve_session(db: AsyncSession, token: str | None) -> SessionContext
     if row is None:
         return None
     session, user = row
-    if session.expires_at <= utcnow() or not user.is_active:
+    now = utcnow()
+    if not user.is_active:
+        return None
+    if user.role == Role.GUEST:
+        code = (
+            await db.execute(
+                select(AccessCode)
+                .join(GuestAccount, GuestAccount.access_code_id == AccessCode.id)
+                .where(GuestAccount.user_id == user.id)
+            )
+        ).scalar_one_or_none()
+        # Checked before the session's own expiry: a guest session ends exactly when its code
+        # does, and the guest should be told why instead of getting a generic 401.
+        if code is None or code.revoked_at is not None or code.expires_at <= now:
+            raise GuestAccessEndedError
+        if session.expires_at <= now:
+            return None
+        return SessionContext(session=session, user=user, access_code=code)
+    if session.expires_at <= now:
         return None
     return SessionContext(session=session, user=user)
 

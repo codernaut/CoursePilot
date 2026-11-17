@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, Request
 
-from app.api.deps import CurrentUser, DbDep, SettingsDep
+from app.api.deps import CurrentMember, DbDep, SettingsDep
 from app.retrieval.access import AccessContext
 from app.retrieval.hybrid import SearchFilters
 from app.retrieval.query_embedding import QueryEmbedder
@@ -24,7 +24,7 @@ async def search(
     request: Request,
     db: DbDep,
     settings: SettingsDep,
-    ctx: CurrentUser,
+    ctx: CurrentMember,
     q: Annotated[str, Query(min_length=1, max_length=2000)],
     module_id: Annotated[str | None, Query(max_length=64)] = None,
     scope: Level | None = None,
@@ -34,6 +34,8 @@ async def search(
 ) -> SearchOut:
     """Hybrid search. ``scope`` defaults to ``module`` when ``module_id`` is given, else ``all``.
     ``widen=true`` goes module -> block -> all until a tier is sufficient."""
+    if ctx.access_code is not None:  # a guest searches its own module only
+        module_id, scope, widen = ctx.access_code.module_id, "module", False
     search_scope = await search_service.resolve_scope(db, scope=scope, module_id=module_id)
     outcome = await search_service.search(
         db,
@@ -62,8 +64,8 @@ async def search(
 
 
 @router.get("/chunks/{chunk_id}", response_model=PassageOut)
-async def get_chunk(chunk_id: str, db: DbDep, ctx: CurrentUser) -> PassageOut:
+async def get_chunk(chunk_id: str, db: DbDep, ctx: CurrentMember) -> PassageOut:
     chunk = await search_service.read_passage(
         db, access=AccessContext.from_user(ctx.user), chunk_id=chunk_id
     )
-    return PassageOut.from_chunk(chunk)
+    return PassageOut.from_chunk(chunk, include_document_url=not ctx.is_guest)

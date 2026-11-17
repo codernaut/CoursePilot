@@ -26,6 +26,7 @@
           <div class="module-links">
             <a href="/modules/{{ module.id }}/materials">Materials<span class="visually-hidden"> for {{ module.title }}</span></a>
             <a href="/chat?module_id={{ module.id }}">Ask in chat<span class="visually-hidden"> about {{ module.title }}</span></a>
+            {% if user.role.value in ("admin", "faculty") %}<a href="/modules/{{ module.id }}/materials#temporary-access">Temporary access<span class="visually-hidden"> for {{ module.title }}</span></a>{% endif %}
           </div>
         </div>
       </li>

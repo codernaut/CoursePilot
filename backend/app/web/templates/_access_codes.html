@@ -1,0 +1,73 @@
+{# Temporary access panel (faculty and admins): create a code for this module, list and revoke codes. #}
+<section class="access-section" id="temporary-access" aria-labelledby="access-heading">
+  <h2 id="access-heading">Temporary access</h2>
+  <p class="muted">Give guests without an account a code for <strong>{{ module.title }}</strong> only. They can chat, search and read cited passages in this module, but cannot download files or see other modules. The period starts when you create the code and ends for everyone at the same time.</p>
+
+  {% if new_code %}
+  <div class="card new-code" role="status" aria-labelledby="new-code-heading">
+    <h3 id="new-code-heading">Your new access code</h3>
+    <div class="code-row">
+      <span id="new-code-value" class="code-value">{{ new_code[1] }}</span>
+      <button type="button" id="copy-code" class="button button-secondary" hidden><svg class="i"><use href="#copy"/></svg> Copy code</button>
+    </div>
+    <p id="copy-status" class="visually-hidden" role="status" aria-live="polite"></p>
+    <p>Valid until <strong><time datetime="{{ new_code[0].expires_at.isoformat() }}" data-local-time>{{ new_code[0].expires_at.strftime("%H:%M") }} UTC</time></strong> ({{ new_code[0].duration_hours }} hours from now). <strong>This is the only time the code is shown.</strong> If you lose it, revoke it and create a new one.</p>
+  </div>
+  <script src="{{ static_url('js/access_codes.js') }}" defer></script>
+  {% endif %}
+
+  <form method="post" action="/modules/{{ module.id }}/access-codes" class="access-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field">
+      <label for="access-duration">Valid for</label>
+      <select id="access-duration" name="duration_hours">
+        {% for h in durations %}<option value="{{ h }}"{% if h == 4 %} selected{% endif %}>{{ h }} hours</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="access-label">Label (optional)</label>
+      <input id="access-label" type="text" name="label" maxlength="80" placeholder="e.g. Revision session">
+    </div>
+    <button type="submit" class="button">Create access code</button>
+  </form>
+
+  {% if access_codes %}
+  <div class="table-wrap">
+    <table>
+      <caption class="visually-hidden">Access codes for {{ module.title }}</caption>
+      <thead>
+        <tr><th scope="col">Label</th><th scope="col">Code</th><th scope="col">Created by</th><th scope="col">Status</th><th scope="col">Guests joined</th><th scope="col">Actions</th></tr>
+      </thead>
+      <tbody>
+        {% for view in access_codes %}
+        <tr>
+          <th scope="row">{{ view.code.label or "No label" }}</th>
+          <td><code>&bull;&bull;&bull;&bull;{{ view.code.code_hint }}</code></td>
+          <td>{{ view.created_by_name }}</td>
+          <td>
+            {% if view.status == "active" %}<span class="badge badge-ready">Active</span> {{ time_left(view.code.expires_at) }} left (until <time datetime="{{ view.code.expires_at.isoformat() }}" data-local-time>{{ view.code.expires_at.strftime("%H:%M") }} UTC</time>)
+            {% elif view.status == "revoked" %}<span class="badge badge-off">Revoked</span>
+            {% else %}<span class="badge badge-uploaded">Expired</span>{% endif %}
+          </td>
+          <td>{{ view.code.redemptions }}</td>
+          <td>
+            {% if view.status == "active" %}
+            <details class="confirm">
+              <summary class="button button-small button-secondary">Revoke<span class="visually-hidden"> code ending {{ view.code.code_hint }}</span></summary>
+              <form method="post" action="/modules/{{ module.id }}/access-codes/{{ view.code.id }}/revoke" class="stack">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <p>Everyone who joined with this code is signed out immediately.</p>
+                <button type="submit" class="button button-small button-danger">Yes, revoke the code</button>
+              </form>
+            </details>
+            {% else %}<span class="muted">&ndash;</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No active access codes for this module.</p>
+  {% endif %}
+</section>

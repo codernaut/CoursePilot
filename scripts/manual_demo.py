@@ -302,6 +302,15 @@ def populate() -> None:
         ) as r:
             for _ in r.iter_lines():
                 pass
+        c.post("/api/v1/auth/logout", headers={"X-CSRF-Token": csrf})
+        csrf = login(c, "faculty")  # codes are created by faculty or admins
+        created = c.post(
+            f"/api/v1/modules/{cardio}/access-codes",
+            json={"duration_hours": 8, "label": "Revision session"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        with (DEMO / "credentials.txt").open("a", encoding="utf-8") as handle:
+            handle.write("guest-code " + created.json()["code"] + "\n")
     print("manual demo populated", flush=True)
 
 

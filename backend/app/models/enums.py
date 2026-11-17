@@ -5,6 +5,7 @@ class Role(StrEnum):
     ADMIN = "admin"
     FACULTY = "faculty"
     STUDENT = "student"
+    GUEST = "guest"  # no account: admitted by a module access code (M9)
 
 
 class DocumentStatus(StrEnum):

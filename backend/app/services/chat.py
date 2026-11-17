@@ -26,6 +26,7 @@ from app.core.config import Settings
 from app.core.errors import (
     PROVIDER_NOT_CONFIGURED_MESSAGE,
     AppError,
+    forbidden,
     not_found,
     validation_error,
 )
@@ -40,6 +41,7 @@ from app.retrieval.access import AccessContext
 from app.retrieval.hybrid import PATH_SEPARATOR, SearchScope
 from app.retrieval.query_embedding import QueryEmbedder
 from app.schemas.chat import MAX_MESSAGE_CHARS
+from app.services import access_codes
 from app.websearch.base import WebSearchProvider, clean_line
 
 log = get_logger(__name__)
@@ -237,6 +239,7 @@ class PreparedTurn:
     context: AgentContext
     is_admin: bool
     user_id: str
+    is_guest: bool = False
 
 
 def clean_message(message: str) -> str:
@@ -272,6 +275,16 @@ async def prepare_turn(
     every failure case no slot is held and nothing was stored. The caller must pass the result to
     ``run_turn``, which releases the slot."""
     question = clean_message(message)
+
+    if user.role == Role.GUEST:
+        # A guest chats about the one module of its code (never "All material"); the access
+        # filter enforces the same inside the SQL, this just gives a clear error.
+        guest_code = await access_codes.get_guest_code(db, user.id)
+        if guest_code is None or not access_codes.is_valid(guest_code):
+            raise forbidden("Your temporary access has ended.")
+        if module_id and module_id != guest_code.module_id:
+            raise forbidden("Temporary access covers one module only.")
+        module_id = guest_code.module_id
 
     conversation: Conversation | None = None
     if conversation_id:
@@ -356,6 +369,7 @@ async def prepare_turn(
         context=context,
         is_admin=user.role == Role.ADMIN,
         user_id=user.id,
+        is_guest=user.role == Role.GUEST,
     )
 
 
@@ -434,6 +448,12 @@ async def _store_answer(
         return message
 
 
+async def _guest_access_valid(database: Database, user_id: str) -> bool:
+    async with database.read_session() as db:
+        code = await access_codes.get_guest_code(db, user_id)
+    return code is not None and access_codes.is_valid(code)
+
+
 async def run_turn(
     database: Database,
     runtime: AgentRuntime,
@@ -487,6 +507,11 @@ async def run_turn(
                 break
         if result is None:  # pragma: no cover - the graph always ends with a result
             yield error_event("agent_error", "Something went wrong while answering.")
+            return
+        if prepared.is_guest and not await _guest_access_valid(database, prepared.user_id):
+            # Access ended (expired or revoked) while the answer was being written: nothing is
+            # stored and no citations are sent.
+            yield error_event("access_ended", "Your temporary access has ended.")
             return
         latency_ms = int((time.monotonic() - started) * 1000)
         stored = await _store_answer(

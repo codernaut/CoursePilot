@@ -87,13 +87,15 @@ class PassageOut(BaseModel):
     metadata: dict[str, Any]
 
     @classmethod
-    def from_chunk(cls, chunk: RetrievedChunk) -> "PassageOut":
+    def from_chunk(
+        cls, chunk: RetrievedChunk, *, include_document_url: bool = True
+    ) -> "PassageOut":
         return cls(
             chunk_id=chunk.chunk_id,
             document_id=chunk.document_id,
             document_title=chunk.document_title,
             document_filename=chunk.document_filename,
-            document_url=search_service.document_link(chunk),
+            document_url=search_service.document_link(chunk) if include_document_url else "",
             module_id=chunk.module_id,
             year_title=chunk.year_title,
             block_title=chunk.block_title,

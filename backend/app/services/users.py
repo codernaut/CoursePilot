@@ -22,6 +22,11 @@ def _require_admin(actor: User) -> None:
         raise forbidden("Only administrators can manage users.")
 
 
+def _reject_guest_role(role: Role) -> None:
+    if role == Role.GUEST:
+        raise validation_error("Guests are created by access codes, not as accounts.")
+
+
 def _clean_name(name: str) -> str:
     cleaned = " ".join(name.split())
     if not cleaned or len(cleaned) > _MAX_NAME:
@@ -43,14 +48,18 @@ async def get_user(db: AsyncSession, actor: User, user_id: str) -> User:
 
 async def _load(db: AsyncSession, user_id: str) -> User:
     user = await db.get(User, user_id)
-    if user is None:
+    if user is None or user.role == Role.GUEST:  # guests are not managed as accounts
         raise not_found("User not found.")
     return user
 
 
 async def list_users(db: AsyncSession, actor: User) -> list[User]:
     _require_admin(actor)
-    return list((await db.execute(select(User).order_by(User.email))).scalars())
+    return list(
+        (
+            await db.execute(select(User).where(User.role != Role.GUEST).order_by(User.email))
+        ).scalars()
+    )
 
 
 async def count_active_admins(db: AsyncSession) -> int:
@@ -129,6 +138,7 @@ async def create_user(
     """Create an account. Returns the user and the generated temporary password (if the admin
     did not supply one). The user must change the password at first login."""
     _require_admin(actor)
+    _reject_guest_role(role)
     generated: str | None = None
     if not password:
         generated = generate_temporary_password()
@@ -165,6 +175,8 @@ async def update_user(
     is_active: bool | None = None,
 ) -> User:
     _require_admin(actor)
+    if role is not None:
+        _reject_guest_role(role)
     user = await _load(db, user_id)
     losing_admin = user.role == Role.ADMIN and user.is_active
     demoting = role is not None and role != user.role and user.role == Role.ADMIN

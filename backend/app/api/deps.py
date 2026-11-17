@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.errors import AppError, forbidden, unauthorized
 from app.db.session import Database
+from app.models import Module
 from app.models.enums import Role
 from app.services import auth
 from app.services.auth import LoginThrottle, SessionContext
@@ -45,6 +46,11 @@ def get_throttle(request: Request) -> LoginThrottle:
 
 def get_password_throttle(request: Request) -> LoginThrottle:
     throttle: LoginThrottle = request.app.state.password_throttle
+    return throttle
+
+
+def get_guest_throttle(request: Request) -> LoginThrottle:
+    throttle: LoginThrottle = request.app.state.guest_throttle
     return throttle
 
 
@@ -150,6 +156,7 @@ async def _authenticate(
     db: AsyncSession,
     *,
     allow_pending: bool,
+    allow_guest: bool = False,
 ) -> SessionContext:
     token = get_session_token(request, settings)
     ctx = await auth.resolve_session(db, token)
@@ -160,6 +167,15 @@ async def _authenticate(
         submitted = await submitted_csrf_token(request)
         if not submitted or not constant_time_equals(submitted, ctx.session.csrf_token):
             raise csrf_failed()
+    if ctx.is_guest and not allow_guest:
+        # Deny by default: only the routes that opt in (chat, search, passages, logout) are open
+        # to guests. ``details.guest`` lets pages send the guest back to the chat instead.
+        raise AppError(
+            "forbidden",
+            "Temporary access does not include this.",
+            status_code=403,
+            details={"guest": True},
+        )
     if ctx.user.must_change_password and not allow_pending:
         raise AppError(
             PASSWORD_CHANGE_REQUIRED,
@@ -173,6 +189,12 @@ async def _authenticate(
         await auth.touch_session(db, ctx.session.id, ctx.session.last_seen_at)
     request.state.csrf_token = ctx.session.csrf_token
     request.state.user = ctx.user
+    if ctx.access_code is not None:  # for the top-bar badge of a guest
+        module = await db.get(Module, ctx.access_code.module_id)
+        request.state.guest_access = {
+            "module_title": module.title if module else "",
+            "expires_at": ctx.access_code.expires_at,
+        }
     return ctx
 
 
@@ -189,8 +211,30 @@ async def require_user_allow_pending(
     return await _authenticate(request, settings, database, db, allow_pending=True)
 
 
+async def require_member(
+    request: Request, settings: SettingsDep, database: DatabaseDep, db: DbDep
+) -> SessionContext:
+    """An account OR a guest (temporary module access): for chat, search and passages only."""
+    return await _authenticate(
+        request, settings, database, db, allow_pending=False, allow_guest=True
+    )
+
+
+async def require_session(
+    request: Request, settings: SettingsDep, database: DatabaseDep, db: DbDep
+) -> SessionContext:
+    """Any live session, guests and users who must still change their password included (logout)."""
+    return await _authenticate(
+        request, settings, database, db, allow_pending=True, allow_guest=True
+    )
+
+
+# Accounts only: a guest is refused (403).
 CurrentUser = Annotated[SessionContext, Depends(require_user)]
 CurrentUserAllowPending = Annotated[SessionContext, Depends(require_user_allow_pending)]
+# Accounts and guests.
+CurrentMember = Annotated[SessionContext, Depends(require_member)]
+AnySession = Annotated[SessionContext, Depends(require_session)]
 
 
 def require_role(*roles: Role) -> Callable[..., Awaitable[SessionContext]]:

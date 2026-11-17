@@ -8,6 +8,7 @@
   <p class="brand-title">CoursePilot</p>
   <p class="tagline">Ask your course material. Get answers you can cite.</p>
   <h1>Log in</h1>
+  {% if access_ended %}<p class="alert alert-info" role="status">Your temporary access has ended. Ask your instructor for a new code, or log in with your account.</p>{% endif %}
   {% if error %}<p class="alert alert-error" role="alert">{{ error }}</p>{% endif %}
   <form method="post" action="/login" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -18,6 +19,19 @@
     <button type="submit" class="button">Log in</button>
   </form>
   <p class="muted">Accounts are created by an administrator. Ask your administrator if you need access.</p>
+</section>
+<section class="login-card login-card-guest" aria-labelledby="guest-heading">
+  <h2 id="guest-heading">Have a module access code?</h2>
+  <p class="muted">Your instructor can give you a temporary code for one module. No account needed.</p>
+  {% if guest_error %}<p class="alert alert-error" role="alert">{{ guest_error }}</p>{% endif %}
+  <form method="post" action="/login/guest" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="guest-code">Access code</label>
+    <input id="guest-code" name="code" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" required maxlength="64" placeholder="ABCD-EFGH-JKM">
+    <label for="guest-name">Your name</label>
+    <input id="guest-name" name="name" type="text" autocomplete="name" required maxlength="40" value="{{ guest_name or '' }}">
+    <button type="submit" class="button button-secondary">Join with code</button>
+  </form>
 </section>
 </div>
 {% endblock %}

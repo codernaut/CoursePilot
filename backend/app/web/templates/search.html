@@ -5,7 +5,8 @@
   <div>
     <span class="tag">Search</span>
     <h1>Search the material</h1>
-    <p class="muted">Searches the uploaded material of the whole programme. Every signed-in user can read all of it.</p>
+    {% if guest_module %}<p class="muted">Searches the material of {{ guest_module.title }}, the module your access code is for.</p>
+    {% else %}<p class="muted">Searches the uploaded material of the whole programme. Every signed-in user can read all of it.</p>{% endif %}
   </div>
 </div>
 <form method="get" action="/search" class="search-form">
@@ -14,6 +15,7 @@
     <input id="search-q" type="text" name="q" value="{{ q }}" maxlength="2000" required>
   </div>
   <div class="search-options">
+    {% if not guest_module %}
     <div class="field">
       <label for="search-module">Module</label>
       <select id="search-module" name="module_id">
@@ -37,11 +39,14 @@
         <option value="all"{% if scope == "all" %} selected{% endif %}>All material</option>
       </select>
     </div>
+    {% endif %}
     <div class="field">
       <label for="search-week">Week (optional)</label>
       <input id="search-week" type="text" name="week" value="{{ week }}" maxlength="60">
     </div>
+    {% if not guest_module %}
     <label class="checkbox" for="search-widen"><input id="search-widen" type="checkbox" name="widen" value="1"{% if widen %} checked{% endif %}> Widen automatically (module, then block, then all)</label>
+    {% endif %}
   </div>
   <button type="submit" class="button"><svg class="i"><use href="#search"/></svg> Search</button>
 </form>
