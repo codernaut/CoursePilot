@@ -110,7 +110,31 @@ class EnvFile:
     def load(cls, env_path: Path, example_path: Path) -> "EnvFile":
         source = env_path if env_path.exists() else example_path
         text = source.read_text(encoding="utf-8") if source.exists() else ""
-        return cls(text.splitlines())
+        env = cls(text.splitlines())
+        if source == env_path and example_path.exists():
+            env.add_missing(example_path.read_text(encoding="utf-8").splitlines())
+        return env
+
+    def keys(self) -> set[str]:
+        return {m.group(1) for line in self.lines if (m := _LINE_RE.match(line))}
+
+    def add_missing(self, example_lines: list[str]) -> list[str]:
+        """Append every option of ``.env.example`` this file lacks (added in a newer version), with
+        its default value and comment, so ``.env`` always lists every option. Existing values are
+        never changed. Returns the added keys."""
+        present = self.keys()
+        added = [
+            line
+            for line in example_lines
+            if (m := _LINE_RE.match(line)) and m.group(1) not in present
+        ]
+        if added:
+            self.lines += [
+                "",
+                "# Options added by setup from .env.example (defaults; edit as needed)",
+            ]
+            self.lines += added
+        return [m.group(1) for line in added if (m := _LINE_RE.match(line))]
 
     def get(self, key: str) -> str | None:
         for line in self.lines:

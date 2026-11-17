@@ -352,3 +352,32 @@ def test_port_prompt_rejects_non_ascii_digits(tmp_path: Path) -> None:
     code, _p, _deps, env_path = _run(tmp_path, ["²", *FRESH_DEFAULTS, *ADMIN_ANSWERS])
     assert code == 0
     assert EnvFile.load(env_path, EXAMPLE).get("APP_PORT") == "8000"
+
+
+def test_existing_env_gets_options_added_in_newer_versions(tmp_path: Path) -> None:
+    """Options added to .env.example after the first setup are appended with their defaults;
+    existing values (keys included) are never changed."""
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "# mine\nLLM_PROVIDER=gemini\nGOOGLE_API_KEY=keep-this-secret-1234\n", encoding="utf-8"
+    )
+    env = EnvFile.load(env_path, EXAMPLE)
+    example = EnvFile(EXAMPLE.read_text(encoding="utf-8").splitlines())
+    assert env.keys() == example.keys()
+    assert env.get("LLM_PROVIDER") == "gemini"
+    assert env.get("GOOGLE_API_KEY") == "keep-this-secret-1234"
+    assert env.get("CHAT_DAILY_LIMIT_PER_USER") == example.get("CHAT_DAILY_LIMIT_PER_USER")
+    assert env.lines[:3] == [
+        "# mine",
+        "LLM_PROVIDER=gemini",
+        "GOOGLE_API_KEY=keep-this-secret-1234",
+    ]
+    env.write(env_path)
+    again = EnvFile.load(env_path, EXAMPLE)
+    assert again.lines == env.lines  # nothing more to add the second time
+
+
+def test_complete_env_is_left_unchanged(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text(EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
+    assert EnvFile.load(env_path, EXAMPLE).lines == EXAMPLE.read_text(encoding="utf-8").splitlines()

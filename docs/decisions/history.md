@@ -547,3 +547,7 @@ M9 review fixes (2026-11-17): migration 0003 now verifies after the `sqlite_mast
 ### Deployment profiles (2026-11-17)
 
 Owner decision: three deployment profiles, documented with sizing in the user manual and `docs/deploy.md`: (1) on-premises with cloud AI (today's behaviour), (2) on-premises with local AI models, (3) everything in the cloud, either as a service on a VPS (systemd + Caddy, available) or as a Docker container. Docker moves from "out of scope" to an optional, planned cloud packaging (M10); it is never required for development, tests, CI, setup or the service install. Local AI is not in the code (only `anthropic` and `gemini` chat providers exist) and becomes M11: a third chat provider (Ollama) plus a local embedding provider. Both milestones start only when the owner says so (the owner starts them when enough of the current usage window remains). Sizing figures in the manual are guidance for one programme and up to ~100 concurrent users; every profile is a single instance because of SQLite's single writer.
+
+### Setup adds new options to an existing .env (2026-11-17)
+
+`EnvFile.load` (`app/setup_flow.py`) appends every variable of `.env.example` that an existing `.env` lacks (with its default value and comment, under one "# Options added by setup" header), so a `.env` created by an older version lists every option after re-running setup. Existing values, keys included, are never changed; a complete `.env` is left as is. Tests in `tests/unit/test_setup_flow.py`.

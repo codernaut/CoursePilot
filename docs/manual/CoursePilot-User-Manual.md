@@ -140,7 +140,7 @@ When this mode is on, administrators see a banner on every page: "Traffic to thi
 
 ## Running setup again
 
-You can run setup again at any time (for example to change a key or the network setting). Existing values are shown as defaults, so pressing **Enter** keeps them. API keys are never printed in full: they are shown masked, for example `****a1b2`, or `(not set)`. Type `-` to clear a key. Comments and unknown lines in `.env` are preserved, and an existing strong secret key is kept. If you change the embedding settings, setup reminds you to re-index existing material (see Troubleshooting).
+You can run setup again at any time (for example to change a key or the network setting). Existing values are shown as defaults, so pressing **Enter** keeps them. API keys are never printed in full: they are shown masked, for example `****a1b2`, or `(not set)`. Type `-` to clear a key. Comments and unknown lines in `.env` are preserved, and an existing strong secret key is kept. After an upgrade, setup also adds any **new options** to the end of `.env` with their default values and explanations, so `.env` always lists every available setting; your existing values are not changed. If you change the embedding settings, setup reminds you to re-index existing material (see Troubleshooting).
 
 ## What setup writes
 
