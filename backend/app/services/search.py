@@ -129,6 +129,7 @@ async def search(
             top_k=k,
             min_score=settings.retrieval_min_score,
             min_hits=settings.retrieval_min_hits,
+            max_per_document=settings.retrieval_max_per_document,
         )
         return SearchOutcome(query, tiers)
     chunks = await hybrid_search(
@@ -139,6 +140,7 @@ async def search(
         query_vector=vector,
         filters=filters,
         top_k=k,
+        max_per_document=settings.retrieval_max_per_document,
     )
     sufficient = is_sufficient(
         chunks, min_score=settings.retrieval_min_score, min_hits=settings.retrieval_min_hits

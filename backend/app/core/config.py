@@ -86,6 +86,8 @@ class Settings(BaseSettings):
     retrieval_llm_chars: int = Field(1000, ge=200, le=4000)  # model-visible text per passage
     retrieval_min_score: float = Field(0.0, ge=0.0, le=1.0)  # min cosine similarity
     retrieval_min_hits: int = Field(1, ge=0)
+    # max chunks one document may contribute to the final top-k (source diversity)
+    retrieval_max_per_document: int = Field(4, ge=1)
     rerank_enabled: bool = False
 
     # Limits

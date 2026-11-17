@@ -138,6 +138,33 @@ async def test_a_failing_judge_falls_back_to_the_threshold_verdict(
     assert [c["marker"] for c in result.citations] == ["C1"]
 
 
+async def test_sources_from_both_a_guide_and_a_textbook_reach_the_answer_prompt(
+    app: FastAPI,
+    settings: Settings,
+    corpus: dict[str, Any],
+    llms: Llms,
+    runtime: AgentRuntime,
+) -> None:
+    module = corpus["mods"]["1.1.1"]
+    guide = "\n\n".join(f"## Case {n}\n\n{QUESTION} case answer {n}" for n in range(1, 11))
+    book = "\n\n".join(
+        f"## Chapter {n}\n\nA heap keeps the largest item at the root, with much longer "
+        f"explanatory detail about arrays and trees {n}"
+        for n in range(1, 6)
+    )
+    await ingest_markdown(app, settings, module_id=module, title="Guide", body=guide)
+    await ingest_markdown(app, settings, module_id=module, title="Textbook", body=book)
+    app.state.settings.retrieval_max_per_document = 2
+    app.state.settings.retrieval_top_k = 4
+    context = await build_context(app, llms, scope=SearchScope("module", module))
+    result, _ = await run(runtime, context, QUESTION)
+    prompt = str(llms.main.calls[-1][-1].content)
+    assert 'document="Guide"' in prompt and 'document="Textbook"' in prompt
+    assert prompt.count('document="Guide"') <= 2  # the cap
+    assert prompt.count('document="Textbook"') >= 1
+    assert result.searched == ["module"]
+
+
 async def test_all_material_chat_has_a_single_tier_and_no_judge(
     app: FastAPI, corpus: dict[str, Any], llms: Llms, runtime: AgentRuntime
 ) -> None:

@@ -174,6 +174,62 @@ def rrf_fuse(rankings: Sequence[Sequence[int]], k: int = RRF_K) -> list[tuple[in
     return [(item, scores[item]) for item in ordered]
 
 
+@dataclass(frozen=True)
+class DiversePlan:
+    """``primary`` are the indexes (into the fused ranking) taken under the cap, ``skipped`` the
+    indexes passed over because their document was at the cap, ``capped`` the documents that
+    had at least one chunk skipped."""
+
+    primary: list[int]
+    skipped: list[int]
+    capped: list[str]
+
+
+def plan_diverse(
+    fused: Sequence[tuple[int, float]],
+    doc_of: dict[int, str],
+    top_k: int,
+    max_per_document: int,
+) -> DiversePlan:
+    primary: list[int] = []
+    skipped: list[int] = []
+    capped: list[str] = []
+    per_doc: dict[str, int] = {}
+    for index, (seq, _score) in enumerate(fused):
+        if len(primary) >= top_k:
+            break
+        doc = doc_of.get(seq, "")
+        if per_doc.get(doc, 0) >= max_per_document:
+            skipped.append(index)
+            if doc not in capped:
+                capped.append(doc)
+            continue
+        per_doc[doc] = per_doc.get(doc, 0) + 1
+        primary.append(index)
+    return DiversePlan(primary, skipped, capped)
+
+
+def select_diverse(
+    fused: Sequence[tuple[int, float]],
+    doc_of: dict[int, str],
+    top_k: int,
+    max_per_document: int,
+) -> list[tuple[int, float]]:
+    """The final ``top_k`` of a fused ranking with at most ``max_per_document`` chunks per document.
+
+    Walks the ranking in order and takes a chunk unless its document is already at the cap; when
+    that leaves fewer than ``top_k`` (few documents), the skipped chunks fill the remaining slots
+    in fused order. The result keeps the fused order. The input is already scope/status/access
+    filtered by SQL; this only chooses among those candidates."""
+    plan = plan_diverse(fused, doc_of, top_k, max_per_document)
+    chosen = set(plan.primary)
+    for index in plan.skipped:
+        if len(chosen) >= top_k:
+            break
+        chosen.add(index)
+    return [fused[i] for i in sorted(chosen)]
+
+
 def best_similarity(chunks: Sequence[RetrievedChunk]) -> float | None:
     """The highest vector similarity among ``chunks`` (``None`` when none came from the vectors)."""
     return max(
@@ -208,10 +264,19 @@ def _scope_sql(scope: SearchScope) -> tuple[str, dict[str, Any]]:
     return "1 = 1", {}
 
 
+EXCLUDED_PARAM = "excluded_docs"
+
+
 def where_clause(
-    scope: SearchScope, access: AccessContext, filters: SearchFilters
+    scope: SearchScope,
+    access: AccessContext,
+    filters: SearchFilters,
+    exclude_documents: Sequence[str] = (),
 ) -> tuple[str, dict[str, Any]]:
-    """The one predicate shared by both retrieval queries (aliases: c = chunks, d = documents)."""
+    """The one predicate shared by both retrieval queries (aliases: c = chunks, d = documents).
+
+    ``exclude_documents`` adds ``d.id NOT IN :excluded_docs`` (an expanding bind parameter; run the
+    statement through ``_stmt``)."""
     scope_sql, params = _scope_sql(scope)
     guard = access_filter(access)
     parts = [scope_sql, "d.status = 'ready'", f"({guard.sql})"]
@@ -222,7 +287,17 @@ def where_clause(
     if filters.document_id is not None:
         parts.append("d.id = :document_id")
         params["document_id"] = filters.document_id
+    if exclude_documents:
+        parts.append(f"d.id NOT IN :{EXCLUDED_PARAM}")
+        params[EXCLUDED_PARAM] = list(exclude_documents)
     return " AND ".join(parts), params
+
+
+def _stmt(sql: str, params: dict[str, Any]) -> Any:
+    statement = text(sql)
+    if EXCLUDED_PARAM in params:
+        statement = statement.bindparams(bindparam(EXCLUDED_PARAM, expanding=True))
+    return statement
 
 
 def vector_sql(where: str) -> str:
@@ -303,32 +378,32 @@ async def hybrid_search(
     filters: SearchFilters | None = None,
     top_k: int = 8,
     candidates: int = CANDIDATES,
+    max_per_document: int | None = None,
 ) -> list[RetrievedChunk]:
     """The best ``top_k`` chunks of ``scope`` for ``query``, best first. The caller has already
-    checked the embedding invariant and embedded the query."""
+    checked the embedding invariant and embedded the query. ``max_per_document`` caps how many
+    chunks one document may contribute (see ``select_diverse``); ``None`` means no cap."""
     filters = filters or SearchFilters()
-    where, params = where_clause(scope, access, filters)
-    params = {**params, "k": candidates}
-
-    vector_rows = (
-        await db.execute(
-            text(vector_sql(where)),
-            {**params, "query_vector": sqlite_vec.serialize_float32(list(query_vector))},
-        )
-    ).all()
-    similarity = {int(r.seq): 1.0 - float(r.distance) for r in vector_rows}
-
-    fts_query = build_fts_query(query)
-    fts_ranking: list[int] = []
-    if fts_query is not None:
-        fts_rows = (
-            await db.execute(text(fts_sql(where)), {**params, "fts_query": fts_query})
-        ).all()
-        fts_ranking = [int(r.seq) for r in fts_rows]
-
-    fused = rrf_fuse([[int(r.seq) for r in vector_rows], fts_ranking])[:top_k]
-    if not fused:
+    vector_blob = sqlite_vec.serialize_float32(list(query_vector))
+    fused_all, similarity = await _candidates(
+        db, scope, access, filters, (), query, vector_blob, candidates
+    )
+    if not fused_all:
         return []
+    if max_per_document is None:
+        fused = fused_all[:top_k]
+    else:
+        doc_of = await _documents_of(db, [s for s, _ in fused_all])
+        plan = plan_diverse(fused_all, doc_of, top_k, max_per_document)
+        extra: list[tuple[int, float]] = []
+        if plan.capped and await _other_documents_exist(db, scope, access, filters, plan.capped):
+            extra_fused, extra_similarity = await _candidates(
+                db, scope, access, filters, plan.capped, query, vector_blob, candidates
+            )
+            similarity.update(extra_similarity)
+            extra_docs = await _documents_of(db, [s for s, _ in extra_fused])
+            extra = select_diverse(extra_fused, extra_docs, top_k, max_per_document)
+        fused = _merge(fused_all, plan, doc_of, extra, top_k)
     scores = dict(fused)
     detail = text(_DETAIL_SELECT + "WHERE c.seq IN :seqs").bindparams(
         bindparam("seqs", expanding=True)
@@ -339,6 +414,96 @@ async def hybrid_search(
         for seq, score in fused
         if seq in rows
     ]
+
+
+async def _candidates(
+    db: AsyncSession,
+    scope: SearchScope,
+    access: AccessContext,
+    filters: SearchFilters,
+    exclude_documents: Sequence[str],
+    query: str,
+    vector_blob: bytes,
+    candidates: int,
+) -> tuple[list[tuple[int, float]], dict[int, float]]:
+    """One hybrid pass (vector KNN + FTS, same predicate) -> RRF-fused ranking and the vector
+    similarity (1 - cosine distance) of every vector candidate."""
+    where, params = where_clause(scope, access, filters, exclude_documents)
+    params = {**params, "k": candidates}
+    vector_rows = (
+        await db.execute(_stmt(vector_sql(where), params), {**params, "query_vector": vector_blob})
+    ).all()
+    similarity = {int(r.seq): 1.0 - float(r.distance) for r in vector_rows}
+    fts_query = build_fts_query(query)
+    fts_ranking: list[int] = []
+    if fts_query is not None:
+        fts_rows = (
+            await db.execute(_stmt(fts_sql(where), params), {**params, "fts_query": fts_query})
+        ).all()
+        fts_ranking = [int(r.seq) for r in fts_rows]
+    return rrf_fuse([[int(r.seq) for r in vector_rows], fts_ranking]), similarity
+
+
+async def _documents_of(db: AsyncSession, seqs: Sequence[int]) -> dict[int, str]:
+    if not seqs:
+        return {}
+    query = text("SELECT seq, document_id FROM chunks WHERE seq IN :seqs").bindparams(
+        bindparam("seqs", expanding=True)
+    )
+    rows = (await db.execute(query, {"seqs": list(seqs)})).all()
+    return {int(r.seq): str(r.document_id) for r in rows}
+
+
+async def _other_documents_exist(
+    db: AsyncSession,
+    scope: SearchScope,
+    access: AccessContext,
+    filters: SearchFilters,
+    capped: Sequence[str],
+) -> bool:
+    """Is there any searchable chunk outside the capped documents? (Same predicate as search.)"""
+    where, params = where_clause(scope, access, filters, capped)
+    sql = f"SELECT 1 FROM chunks c JOIN documents d ON d.id = c.document_id WHERE {where} LIMIT 1"
+    return (await db.execute(_stmt(sql, params), params)).first() is not None
+
+
+def _merge(
+    fused_all: Sequence[tuple[int, float]],
+    plan: DiversePlan,
+    doc_of: dict[int, str],
+    extra: Sequence[tuple[int, float]],
+    top_k: int,
+) -> list[tuple[int, float]]:
+    """The final list when a document hit the cap. Without an extra pass (``extra`` empty) it is
+    ``select_diverse``. With one the order is: (1) the first pass's picks from the capped
+    documents, in their fused order; (2) the extra pass's picks, in its own fused order; (3)
+    leftover slots, from the first pass's remaining picks, then its skipped chunks, in fused order.
+    Scores of the two passes are not comparable, so each score is clamped to the previous one to
+    keep the list non-increasing (``score`` only orders results)."""
+    if not extra:
+        chosen = set(plan.primary)
+        for index in plan.skipped:
+            if len(chosen) >= top_k:
+                break
+            chosen.add(index)
+        return [fused_all[i] for i in sorted(chosen)]
+    capped = set(plan.capped)
+    ordered = [fused_all[i] for i in plan.primary if doc_of.get(fused_all[i][0], "") in capped]
+    ordered += list(extra)
+    ordered = ordered[:top_k]
+    have = {seq for seq, _ in ordered}
+    for index in [*plan.primary, *plan.skipped]:
+        if len(ordered) >= top_k:
+            break
+        if fused_all[index][0] not in have:
+            ordered.append(fused_all[index])
+            have.add(fused_all[index][0])
+    result: list[tuple[int, float]] = []
+    ceiling = float("inf")
+    for seq, score in ordered:
+        ceiling = min(ceiling, score)
+        result.append((seq, ceiling))
+    return result
 
 
 async def tier_scopes(db: AsyncSession, start: SearchScope) -> list[SearchScope]:
@@ -370,6 +535,7 @@ async def search_tiered(
     top_k: int = 8,
     min_score: float = 0.0,
     min_hits: int = 1,
+    max_per_document: int | None = None,
 ) -> list[TierResult]:
     """Search ``start`` first and widen tier by tier until one is sufficient. Returns every tier
     that was searched, in order; the last one is the result to use (sufficient or not)."""
@@ -383,6 +549,7 @@ async def search_tiered(
             query_vector=query_vector,
             filters=filters,
             top_k=top_k,
+            max_per_document=max_per_document,
         )
         sufficient = is_sufficient(chunks, min_score=min_score, min_hits=min_hits)
         results.append(TierResult(scope, chunks, sufficient))

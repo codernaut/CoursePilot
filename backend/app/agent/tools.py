@@ -67,6 +67,7 @@ async def search_material(ctx: AgentContext, *, query: str, tier_index: int) -> 
             query=query,
             query_vector=vector,
             top_k=ctx.settings.retrieval_top_k,
+            max_per_document=ctx.settings.retrieval_max_per_document,
         )
     return MaterialSearch(
         scope=scopes[index],

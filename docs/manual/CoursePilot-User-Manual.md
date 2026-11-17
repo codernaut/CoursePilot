@@ -471,7 +471,7 @@ Further down:
 In plain terms, for every question the assistant follows the same fixed path:
 
 1. **Understand the question.** A follow-up such as "and what about heart failure?" is rewritten into a complete question using the recent conversation.
-2. **Search the selected module.** It looks for the best matching passages (by meaning and by keywords).
+2. **Search the selected module.** It looks for the best matching passages (by meaning and by keywords). An answer can combine several documents, for example a case guide for the scenario details and a textbook for the underlying explanation.
 3. **Widen if needed.** If the module does not contain enough, it widens to the whole block, then to all material.
 4. **Only then, the web.** If nothing in the material is good enough, and web search is available for the module, it may search the internet.
 5. **Write the answer** using only the numbered sources it was given, with `[C#]` markers for material and `[W#]` for web pages.

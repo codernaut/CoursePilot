@@ -125,6 +125,7 @@ def test_development_accepts_default_secret_key() -> None:
         ("EMBEDDING_DIM", "0"),
         ("RETRIEVAL_TOP_K", "0"),
         ("RETRIEVAL_MIN_HITS", "-1"),
+        ("RETRIEVAL_MAX_PER_DOCUMENT", "0"),
         ("UPLOAD_MAX_MB", "0"),
         ("CHAT_DAILY_LIMIT_PER_USER", "0"),
         ("AGENT_TIMEOUT_S", "0"),
