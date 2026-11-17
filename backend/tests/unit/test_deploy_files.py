@@ -116,7 +116,10 @@ def test_dockerignore_excludes_secrets_and_data() -> None:
     assert {".env", ".env.*", "!.env.example", "data/", ".git"} <= set(lines)
     assert {"*.db", "*.sqlite", "**/.venv"} <= set(lines)
     # The negation must come after the pattern it re-includes, or it has no effect.
-    assert lines.index("!.env.example") > lines.index(".env.*")
+    # Docker applies the LAST matching rule, so no .env exclusion may follow the re-include
+    # (the Dockerfile COPYs .env.example; a later `**/.env.*` broke the first CI build).
+    env_rules = [i for i, line in enumerate(lines) if ".env" in line and line != "!.env.example"]
+    assert lines.index("!.env.example") > max(env_rules)
     # COPY backend/ must not be able to pull a nested .env or credentials file into the image.
     assert {"**/.env", "**/credentials*", ".manual-demo"} <= set(lines)
 

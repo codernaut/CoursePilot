@@ -5,9 +5,10 @@
 .claude
 .env
 .env.*
-!.env.example
 **/.env
 **/.env.*
+# Must come after every .env.* exclusion (the last matching rule wins):
+!.env.example
 **/credentials*
 data/
 backend/data/
