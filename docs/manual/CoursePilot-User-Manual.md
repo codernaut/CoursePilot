@@ -140,7 +140,7 @@ When this mode is on, administrators see a banner on every page: "Traffic to thi
 
 ## Running setup again
 
-You can run setup again at any time (for example to change a key or the network setting). Existing values are shown as defaults, so pressing **Enter** keeps them. API keys are never printed in full: they are shown masked, for example `****a1b2`, or `(not set)`. Type `-` to clear a key. Comments and unknown lines in `.env` are preserved, and an existing strong secret key is kept. After an upgrade, setup also adds any **new options** to the end of `.env` with their default values and explanations, so `.env` always lists every available setting; your existing values are not changed. If you change the embedding settings, setup reminds you to re-index existing material (see Troubleshooting).
+You can run setup again at any time (for example to change a key or the network setting). Existing values are shown as defaults, so pressing **Enter** keeps them. API keys are never printed in full: they are shown masked, for example `****a1b2`, or `(not set)`. Type `-` to clear a key. Comments and unknown lines in `.env` are preserved, and an existing strong secret key is kept. Every start (`start.bat` / `./start.sh`, and `serve`) and every setup run refreshes `.env` from the template `.env.example`: all options are listed with explanations and their possible values, your values and keys are kept, your own extra settings are kept at the end under "Other settings kept from your previous .env", and your own comment lines are replaced by the standard ones. If you change the embedding settings, setup reminds you to re-index existing material (see Troubleshooting).
 
 ## What setup writes
 
@@ -177,7 +177,7 @@ Press **Ctrl+C** in the terminal. The web app stops and the worker is shut down 
 ## Changing keys or settings later
 
 1. Stop CoursePilot (Ctrl+C).
-2. Run `setup.bat` / `./setup.sh` again, press Enter to keep what is fine and change what you need. (You can also edit `.env` by hand.)
+2. Run `setup.bat` / `./setup.sh` again, press Enter to keep what is fine and change what you need. (You can also edit `.env` by hand: each option in it has a comment explaining its choices.)
 3. Start again with `start.bat` / `./start.sh`.
 
 ## Where your data lives, and backups

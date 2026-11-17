@@ -432,6 +432,8 @@ AUDIT_RETENTION_DAYS=365            # the worker deletes older audit rows
 LOGIN_FAILED_AUDIT_RETENTION_DAYS=30
 ```
 
+`.env.example` is the documented template (comments above each option with its choices); `start`, `serve` and `setup` regenerate `.env` from it keeping the user's values (`sync_env_file` in `app/setup_flow.py`).
+
 The `fake` provider values are accepted by `Settings` (so tests can select them) but are not offered by setup or listed in `.env.example` comments for users to pick. Switching `LLM_PROVIDER` does not change `LLM_MODEL` automatically; setup prefills the matching default.
 
 ---

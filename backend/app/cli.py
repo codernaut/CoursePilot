@@ -23,7 +23,14 @@ from app.db.engine import MIN_SQLITE_VERSION, check_sqlite_capabilities
 from app.db.migrate import BACKEND_DIR, upgrade_to_head
 from app.db.session import Database
 from app.services import backup, production_check, structure, users
-from app.setup_flow import ConsolePrompter, Prompter, SetupDeps, prompt_admin_details, run_setup
+from app.setup_flow import (
+    ConsolePrompter,
+    Prompter,
+    SetupDeps,
+    prompt_admin_details,
+    run_setup,
+    sync_env_file_detailed,
+)
 
 
 def run_check(p: Prompter) -> int:
@@ -430,6 +437,26 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def refresh_env_file(p: Prompter) -> None:
+    """Regenerate ``.env`` from ``.env.example`` (all options, documented, values kept). Never
+    blocks startup and never prints values."""
+    try:
+        result = sync_env_file_detailed(REPO_ROOT / ".env", REPO_ROOT / ".env.example")
+    except Exception as exc:
+        p.say(f"Warning: could not update .env ({type(exc).__name__}); continuing.")
+        return
+    if result is None or not result[0]:
+        return
+    added = result[1]
+    if added:
+        p.say(
+            f"Updated .env: added {len(added)} new option{'s' if len(added) != 1 else ''} "
+            f"({', '.join(added)}) and refreshed the comments."
+        )
+    else:
+        p.say("Updated .env: refreshed the comments.")
+
+
 def main(argv: Sequence[str] | None = None, *, prompter: Prompter | None = None) -> int:
     args = build_parser().parse_args(argv)
     p = prompter or ConsolePrompter()
@@ -445,6 +472,8 @@ def main(argv: Sequence[str] | None = None, *, prompter: Prompter | None = None)
             env_path=REPO_ROOT / ".env",
             example_path=REPO_ROOT / ".env.example",
         )
+    if args.command in ("start", "serve"):
+        refresh_env_file(p)
     settings = get_settings()
     if args.command == "migrate":
         run_migrate(settings)

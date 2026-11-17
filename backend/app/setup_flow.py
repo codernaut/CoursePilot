@@ -1,8 +1,9 @@
 """Interactive first-time setup (``python -m app.cli setup``).
 
 All terminal I/O goes through a ``Prompter`` so the flow is unit-testable. ``.env`` handling is in
-``EnvFile``: it preserves comments and unknown lines, never prints secrets and never rewrites a
-good ``SECRET_KEY``.
+``EnvFile``: it renders the file from the documented ``.env.example`` template (keeping values and
+unknown settings, replacing old comments), never prints secrets and never rewrites a good
+``SECRET_KEY``.
 """
 
 import os
@@ -70,9 +71,17 @@ def mask(value: str | None) -> str:
     return f"****{value[-4:]}" if len(value) >= 12 else "****"
 
 
+def _is_only_comment(rest: str) -> bool:
+    """``KEY=   # note`` is an EMPTY value with a comment (as python-dotenv reads it), while
+    ``KEY=#abc`` (no blank before ``#``) is the value ``#abc``."""
+    return rest[:1].isspace() and rest.strip().startswith("#")
+
+
 def _split_value(rest: str) -> tuple[str, str]:
     """Split the text after ``KEY=`` into (value, trailing comment), honouring quotes."""
     raw = rest.strip()
+    if _is_only_comment(rest):
+        return "", raw
     if raw[:1] in ('"', "'") and len(raw) > 1:
         quote = raw[0]
         out: list[str] = []
@@ -100,6 +109,101 @@ def _format_value(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+OTHER_SETTINGS_HEADER = "# ===== Other settings kept from your previous .env ====="
+
+
+def _raw_value(rest: str) -> str:
+    """The value text after ``KEY=`` exactly as written (quotes and escapes kept), without any
+    trailing inline comment."""
+    raw = rest.strip()
+    if _is_only_comment(rest):
+        return ""
+    if raw[:1] in ('"', "'") and len(raw) > 1:
+        quote = raw[0]
+        i = 1
+        while i < len(raw):
+            if quote == '"' and raw[i] == "\\" and i + 1 < len(raw):
+                i += 2
+                continue
+            if raw[i] == quote:
+                return raw[: i + 1]
+            i += 1
+    match = _COMMENT_RE.match(raw)
+    return match.group(1).strip() if match else raw
+
+
+def render_from_template(example_lines: list[str], current_lines: list[str]) -> list[str]:
+    """Render ``.env`` from the documented template (``.env.example``).
+
+    Comments and layout come from the template; the old file's comment lines are dropped (and old
+    trailing inline comments). Each option takes the value from the current file when present (the
+    last occurrence wins, as python-dotenv does; the raw value text is kept exactly), else the
+    template default. Keys the template does not know, and other stray lines, are kept at the end.
+    """
+    current: dict[str, str] = {}
+    for line in current_lines:
+        if m := _LINE_RE.match(line):
+            current[m.group(1)] = _raw_value(m.group(2))
+    out: list[str] = []
+    known: set[str] = set()
+    for line in example_lines:
+        m = _LINE_RE.match(line)
+        if m is None:
+            out.append(line)
+            continue
+        key = m.group(1)
+        known.add(key)
+        out.append(f"{key}={current[key]}" if key in current else line)
+    extras = [f"{k}={v}" for k, v in current.items() if k not in known]
+    stray = [
+        line
+        for line in current_lines
+        if line.strip() and not line.lstrip().startswith("#") and not _LINE_RE.match(line)
+    ]
+    if extras or stray:
+        out += ["", OTHER_SETTINGS_HEADER, *extras, *stray]
+    return out
+
+
+def sync_env_file(env_path: Path, example_path: Path) -> list[str] | None:
+    """Refresh ``.env`` from the template. None when there is nothing to do (no ``.env`` or no
+    template). Otherwise returns the newly added keys ([] when none were added or nothing changed;
+    an unchanged file is not touched). Values are never changed, printed or logged."""
+    result = sync_env_file_detailed(env_path, example_path)
+    return None if result is None else result[1]
+
+
+def sync_env_file_detailed(env_path: Path, example_path: Path) -> tuple[bool, list[str]] | None:
+    """Like ``sync_env_file`` but returns ``(file_was_rewritten, added_keys)``."""
+    if not env_path.exists() or not example_path.exists():
+        return None
+    current = env_path.read_text(encoding="utf-8").splitlines()
+    example = example_path.read_text(encoding="utf-8").splitlines()
+    rendered = render_from_template(example, current)
+    if rendered == current:
+        return False, []
+    present = {m.group(1) for line in current if (m := _LINE_RE.match(line))}
+    added = [
+        m.group(1) for line in example if (m := _LINE_RE.match(line)) and m.group(1) not in present
+    ]
+    _atomic_write_private(env_path, "\n".join(rendered) + "\n")
+    return True, added
+
+
+def _atomic_write_private(path: Path, text: str) -> None:
+    """Write via a temp file in the same folder (created owner-only), then replace."""
+    tmp = path.with_name(f"{path.name}.{secrets.token_hex(4)}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(text.encode("utf-8"))
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    os.chmod(path, 0o600)
+
+
 class EnvFile:
     """A .env file held as lines; supports reading and updating single keys in place."""
 
@@ -108,33 +212,19 @@ class EnvFile:
 
     @classmethod
     def load(cls, env_path: Path, example_path: Path) -> "EnvFile":
-        source = env_path if env_path.exists() else example_path
-        text = source.read_text(encoding="utf-8") if source.exists() else ""
-        env = cls(text.splitlines())
-        if source == env_path and example_path.exists():
-            env.add_missing(example_path.read_text(encoding="utf-8").splitlines())
-        return env
+        """The current ``.env`` rendered from the template (every option, documented), or the
+        template itself when there is no ``.env`` yet."""
+        if env_path.exists():
+            current = env_path.read_text(encoding="utf-8").splitlines()
+            if example_path.exists():
+                example = example_path.read_text(encoding="utf-8").splitlines()
+                return cls(render_from_template(example, current))
+            return cls(current)
+        text = example_path.read_text(encoding="utf-8") if example_path.exists() else ""
+        return cls(text.splitlines())
 
     def keys(self) -> set[str]:
         return {m.group(1) for line in self.lines if (m := _LINE_RE.match(line))}
-
-    def add_missing(self, example_lines: list[str]) -> list[str]:
-        """Append every option of ``.env.example`` this file lacks (added in a newer version), with
-        its default value and comment, so ``.env`` always lists every option. Existing values are
-        never changed. Returns the added keys."""
-        present = self.keys()
-        added = [
-            line
-            for line in example_lines
-            if (m := _LINE_RE.match(line)) and m.group(1) not in present
-        ]
-        if added:
-            self.lines += [
-                "",
-                "# Options added by setup from .env.example (defaults; edit as needed)",
-            ]
-            self.lines += added
-        return [m.group(1) for line in added if (m := _LINE_RE.match(line))]
 
     def get(self, key: str) -> str | None:
         for line in self.lines:
