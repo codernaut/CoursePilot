@@ -1,0 +1,14 @@
+# The single data volume: SQLite databases, checkpoints, uploaded files, backups.
+# It must be block storage on local-attached or cloud block disks (ReadWriteOnce), NOT NFS/SMB/EFS:
+# SQLite needs working file locks and fast fsync.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: coursepilot-data
+  namespace: coursepilot
+spec:
+  accessModes: ["ReadWriteOnce"]
+  # storageClassName: <your block storage class>   # left out = the cluster's default class
+  resources:
+    requests:
+      storage: 20Gi

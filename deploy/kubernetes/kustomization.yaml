@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: coursepilot
+resources:
+  - namespace.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+# Set your image once here instead of editing deployment.yaml:
+# images:
+#   - name: registry.example.com/coursepilot
+#     newTag: v0.1.0

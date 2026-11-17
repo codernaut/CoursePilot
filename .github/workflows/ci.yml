@@ -61,3 +61,34 @@ jobs:
           name: test-reports-${{ runner.os }}
           path: backend/reports/
           retention-days: 14
+
+  docker:
+    # The optional container image (CLAUDE.md section 1, "Deployment profiles"): it must build, pass
+    # the environment check inside the image, and the compose stack must become ready. Nothing is
+    # published; pushing to a registry is a separate owner decision (release.yml).
+    name: docker image and compose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -t coursepilot:ci --build-arg GIT_COMMIT=${{ github.sha }} .
+
+      - name: Environment check inside the image (SQLite version, FTS5, sqlite-vec)
+        run: docker run --rm coursepilot:ci python -m app.cli check
+
+      - name: Compose smoke test
+        run: |
+          printf 'APP_ENV=development\nBASE_URL=http://localhost:8000\nSECRET_KEY=ci-only-not-a-secret\n' > .env
+          sed -i 's#image: coursepilot:local#image: coursepilot:ci#' compose.yaml
+          docker compose up -d --wait --wait-timeout 180
+          curl -fsS http://localhost:8000/api/v1/health/ready
+          docker compose ps
+          docker compose down -v
+
+      - name: Show compose logs on failure
+        if: failure()
+        run: docker compose logs --no-color || true
+
+      - name: Validate the Kubernetes manifests
+        run: kubectl kustomize deploy/kubernetes > /dev/null

@@ -1,0 +1,31 @@
+# Example for ingress-nginx. Change the host (it must equal BASE_URL in the secret) and the class.
+# Set BEHIND_PROXY=true in the secret: CoursePilot then trusts the LAST X-Forwarded-For entry.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: coursepilot
+  namespace: coursepilot
+  annotations:
+    # Uploads are limited by UPLOAD_MAX_MB (default 50); keep this at least that large.
+    nginx.ingress.kubernetes.io/proxy-body-size: 60m
+    # Chat answers stream (server-sent events): do not buffer, allow long reads.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    # cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [study.example.edu]
+      secretName: coursepilot-tls
+  rules:
+    - host: study.example.edu
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: coursepilot
+                port:
+                  name: http

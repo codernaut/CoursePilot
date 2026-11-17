@@ -32,7 +32,7 @@ CoursePilot is a web-hosted **RAG (retrieval-augmented generation) study assista
 - LMS integrations (Moodle, Canvas, Blackboard): plan for them, but don't build them in v1.
 - Video/audio transcription (planned for v2).
 - Self-registration, per-module permissions, multiple institutions.
-- Node/npm, or any externally installed server (Postgres, Redis, MinIO…). Everything installs with pip/uv. Docker is never *required* (development, tests, CI, setup and the service install stay Docker-free); an optional container image for cloud hosting is the planned M10 (§14).
+- Node/npm, or any externally installed server (Postgres, Redis, MinIO…). Everything installs with pip/uv. Docker is never *required* (development, tests, CI, setup and the service install stay Docker-free); an optional container image (`Dockerfile`, `compose.yaml`, `deploy/kubernetes/`, M10) exists for cloud hosting.
 
 ### Deployment profiles
 
@@ -40,7 +40,7 @@ Three supported ways to run CoursePilot, documented with sizing in the user manu
 
 1. **On-premises, cloud AI** (available): app + worker on the institution's machine; Anthropic/Gemini chat, Gemini/Voyage/OpenAI embeddings, Tavily.
 2. **On-premises, local AI** (planned, M11 in §14; NOT in the code yet, only `anthropic` and `gemini` exist): nothing leaves the network when `WEB_SEARCH_PROVIDER=none`; sized by GPU VRAM.
-3. **Everything in the cloud** (available as a service on a VPS with systemd + Caddy, `deploy/`; **Docker image planned, M10**). Always a single instance: SQLite on the server's local disk or block volume, never a network file system, no horizontal scaling.
+3. **Everything in the cloud** (available as a service on a VPS with systemd + Caddy, `deploy/`; **optional Docker image, M10:** `compose.yaml` for one host, `deploy/kubernetes/` for a cluster; the web app and the worker run from one image). Always a single instance: SQLite on the server's local disk or block volume, never a network file system, no horizontal scaling.
 
 ---
 
@@ -59,6 +59,7 @@ Follow the build order in §14. Update this section as milestones land: one line
 - **M7 done (2026-11-07):** rate limits, admin jobs/usage/feedback, logging redaction, parser process isolation, re-index that stays searchable, e2e smoke test.
 - **M8 done (2026-11-07):** S3Storage, backup/restore, `check --production`, `serve`, `deploy/`, `docs/deploy.md`.
 - **M9 done (2026-11-17):** temporary module access codes: faculty/admins create and revoke per-module codes (2-24 h), guests join without an account and may chat, search and read passages of that one module only.
+- **M10 done (2026-11-17):** optional Docker image, compose (web + worker), Kubernetes manifests (one replica), CI image check.
 - **UI redesign done (2026-11-08, top-bar fix 2026-11-09):** "Warm Studio" design with light/dark themes and accents (rules in §11).
 
 Detailed decisions and exact behaviour per milestone: docs/decisions/history.md (read it before changing an area).
@@ -96,7 +97,7 @@ Choose these unless a decision in this file is explicitly changed. Nothing here 
 
 ## 4. Repository layout
 
-Top level: `CLAUDE.md`, `README.md`, `LICENSE`, `.env.example` (every env var; the real `.env` is at the repo root), `setup.*` / `start.*`, `THIRD_PARTY_NOTICES.md`, `VERSION` (release zips only), `deploy/` (systemd, Caddy, Windows tasks, Litestream, Cloudflare Tunnel examples), `scripts/build_release.py`, `scripts/build_manual.py` and `scripts/manual_demo.py` (rebuild the manual; throwaway demo for its screenshots), `.github/workflows/` (`ci.yml`, `release.yml`), `data/` (gitignored, `DATA_DIR`), `docs/` (`architecture.md`, `deploy.md`, `manual/` (user manual source `CoursePilot-User-Manual.md`, `manual.css`, `img/` screenshots), `decisions/` with ADRs `NNNN-title.md` and `history.md`, the per-milestone decision log), `backend/`.
+Top level: `CLAUDE.md`, `README.md`, `LICENSE`, `.env.example` (every env var; the real `.env` is at the repo root), `setup.*` / `start.*`, `THIRD_PARTY_NOTICES.md`, `VERSION` (release zips only), `Dockerfile`, `.dockerignore`, `compose.yaml` (optional image, web + worker; build context = repo root), `deploy/` (systemd, Caddy, Windows tasks, Litestream, Cloudflare Tunnel examples, `kubernetes/` manifests), `scripts/build_release.py`, `scripts/build_manual.py` and `scripts/manual_demo.py` (rebuild the manual; throwaway demo for its screenshots), `.github/workflows/` (`ci.yml`, `release.yml`), `data/` (gitignored, `DATA_DIR`), `docs/` (`architecture.md`, `deploy.md`, `manual/` (user manual source `CoursePilot-User-Manual.md`, `manual.css`, `img/` screenshots), `decisions/` with ADRs `NNNN-title.md` and `history.md`, the per-milestone decision log), `backend/`.
 
 `backend/`: `pyproject.toml`, `uv.lock`, `alembic.ini`, `migrations/`, `app/`, `tests/` (`unit/`, `integration/`, `fixtures/`, `evals/`).
 
@@ -270,11 +271,11 @@ Everything runs locally without Docker: `pytest` with temporary SQLite files and
 
 ## 14. Build order (milestones)
 
-M0 to M9 and the UI redesign are done (§2). Any further work follows the same rules: one well-bounded milestone at a time, finished and committed in a working state with tests, and recorded in docs/decisions/history.md with one line added to §2. The original milestone scopes: docs/decisions/history.md ("Moved detail from CLAUDE.md §14").
+M0 to M10 and the UI redesign are done (§2). Any further work follows the same rules: one well-bounded milestone at a time, finished and committed in a working state with tests, and recorded in docs/decisions/history.md with one line added to §2. The original milestone scopes: docs/decisions/history.md ("Moved detail from CLAUDE.md §14").
 
-**Next: M10, optional Docker image for cloud hosting (deployment profile 3b; start only when the owner says so).** Scope: one `Dockerfile` (Python 3.12 slim, `uv sync --frozen`, non-root user, the same `app.cli` entry points) running the web app and the worker (two services in a `compose.yaml` sharing one `data/` volume, or one container with `serve --with-worker`); configuration only through `.env` / environment variables; migrations on start; a health check on `/api/v1/health/ready`; `data/` as a local volume (never a network file system); one replica only. No change to the Docker-free install, setup or CI; the image is an additional release artifact. Record the decision in an ADR.
+M10 (optional Docker image, compose, Kubernetes) is done: see docs/decisions/history.md ("M10") and ADR 0002.
 
-**Then: M11, local AI models (deployment profile 2; needs code changes; start only when the owner says so).** A third chat provider next to `anthropic` and `gemini` (e.g. `LLM_PROVIDER=ollama` with `OLLAMA_BASE_URL`, a new module behind `llm/factory.py`, offered by setup) and a local embedding provider behind the embedder interface (changing to it needs `reindex-all`, §7.4). Not in the code today: `Settings` rejects any other provider.
+**Next: M11, local AI models (deployment profile 2; needs code changes; start only when the owner says so).** A third chat provider next to `anthropic` and `gemini` (e.g. `LLM_PROVIDER=ollama` with `OLLAMA_BASE_URL`, a new module behind `llm/factory.py`, offered by setup) and a local embedding provider behind the embedder interface (changing to it needs `reindex-all`, §7.4). Not in the code today: `Settings` rejects any other provider.
 
 ---
 
@@ -301,6 +302,11 @@ If `uv` is not on PATH, `python -m uv` works everywhere `uv` is written below.
 # writes .env, runs migrations, seed-structure, create-admin)
 setup.bat            # Windows
 ./setup.sh           # macOS / Linux
+
+# optional, only for container hosting (guide E/F in docs/deploy.md; needs .env in the repo root)
+docker compose up -d --build
+docker compose run --rm web python -m app.cli create-admin
+kubectl apply -k deploy/kubernetes     # see deploy/kubernetes/README.md
 
 # run (migrates, starts web app + worker, opens the browser)
 start.bat

@@ -1,0 +1,80 @@
+# Docker Compose for CoursePilot: the web app and the background worker from one image.
+# Optional: nothing else in the project needs Docker. Guide: docs/deploy.md, "E. Docker Compose".
+#
+#   docker compose up -d --build                      # build, migrate, start web + worker
+#   docker compose run --rm web python -m app.cli create-admin     # first admin (hidden prompt)
+#   docker compose run --rm web python -m app.cli seed-structure   # Years/Blocks/Modules
+#   docker compose run --rm web python -m app.cli check --production
+#   docker compose run --rm web python -m app.cli backup --out /data/backups --keep 7
+#   docker compose logs -f web worker
+#
+# Rules (CLAUDE.md section 1, "Deployment profiles"):
+#   * ONE instance only. Never `docker compose up --scale web=2` or `--scale worker=2`: SQLite has
+#     one writer and login throttling is in-process.
+#   * /data is the named volume below, on the Docker host's LOCAL disk. Never bind-mount an NFS or
+#     SMB share there.
+#   * Settings come from `.env` next to this file (the one setup.* writes works; or copy
+#     .env.example). Values must not be quoted for `docker run --env-file`, but Compose accepts
+#     either. A literal `$` in a value must be written `$$`.
+#   * Behind HTTPS (production): APP_ENV=production, BASE_URL=https://your.host, a long SECRET_KEY,
+#     BEHIND_PROXY=true. The port is published on 127.0.0.1 only by default (for a proxy on the same host);
+#     set WEB_BIND=0.0.0.0 to reach it from other machines (e.g. a trusted LAN).
+#   * The `environment:` block below overrides .env, so a .env written for a local Windows install
+#     can never point the container at host paths or at 127.0.0.1.
+
+x-coursepilot: &coursepilot
+  image: coursepilot:local
+  env_file: .env
+  environment:
+    APP_HOST: 0.0.0.0
+    APP_PORT: "8000"
+    DATA_DIR: /data
+    DATABASE_URL: sqlite+aiosqlite:////data/coursepilot.db
+    CHECKPOINT_DB_PATH: /data/checkpoints.db
+  volumes:
+    - coursepilot-data:/data
+  restart: unless-stopped
+
+services:
+  web:
+    <<: *coursepilot
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "app.cli", "serve"]
+    ports:
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/ready', timeout=4).status == 200 else 1)"
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+  worker:
+    <<: *coursepilot
+    command: ["python", "-m", "app.worker"]
+    # Starts after web is healthy, i.e. after the migrations have run.
+    depends_on:
+      web:
+        condition: service_healthy
+    stop_grace_period: 30s
+
+  # Optional HTTPS in front (automatic certificates). Uncomment, set your host name in
+  # deploy/Caddyfile (reverse_proxy web:8000), publish only caddy (WEB_BIND stays 127.0.0.1).
+  # caddy:
+  #   image: caddy:2
+  #   ports: ["80:80", "443:443"]
+  #   volumes:
+  #     - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+  #     - caddy-data:/data
+  #   depends_on: [web]
+  #   restart: unless-stopped
+
+volumes:
+  coursepilot-data:
+  # caddy-data:

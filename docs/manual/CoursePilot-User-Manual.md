@@ -203,7 +203,7 @@ CoursePilot can be run in three ways. They differ in **where the application run
 | **Application runs on** | Your own computer or server | Your own server with a GPU | A rented cloud server (VPS) |
 | **AI models** | Anthropic Claude or Google Gemini (cloud APIs) | Open models on your own hardware | Anthropic Claude or Google Gemini (cloud APIs) |
 | **What leaves your network** | Questions, retrieved passages and document text for embedding go to the AI provider; web-search queries go to Tavily | Nothing, if web search is off | Everything is hosted outside; the same AI traffic as option 1 |
-| **Status** | **Available now** | **Planned** (not available yet) | **Available now** as a service; **Docker container planned** |
+| **Status** | **Available now** | **Planned** (not available yet) | **Available now**, as a service or as a Docker container |
 | **Best for** | Most universities; quick start | Strict data-protection rules, no cloud AI allowed | No local server; access from anywhere over HTTPS |
 
 > **The figures below are sizing guidance**, not guarantees. They assume one programme (27 modules) with up to a few thousand documents and up to about 100 students chatting at the same time. Start with the "recommended" column and watch the **Usage** and **Jobs** pages.
@@ -260,7 +260,7 @@ There are two ways to run it on the server:
 
 **3a. As a service (available now).** Install CoursePilot on a Linux virtual server (VPS) exactly as on a local machine, run the web app and the worker as two services (systemd), and put **Caddy** in front for automatic HTTPS certificates. Step-by-step instructions, ready-made service files and backup schedules are in `docs/deploy.md`.
 
-**3b. As a Docker container (planned).** A ready-made container image with the web app and the worker, a volume for `data/` and the `.env` settings, so the same setup runs on any server or platform that runs containers. Docker remains optional: installation without Docker (option 1 and 3a) stays fully supported.
+**3b. As a Docker container (available now, optional).** A ready-made container image runs the web app and the worker, with a volume for the data and your `.env` settings, so the same setup runs on any server that runs containers. Docker remains optional: installation without Docker (option 1 and 3a) stays fully supported. In short: install Docker (Engine 24 or newer with Compose), put your `.env` next to `compose.yaml` in the CoursePilot folder, run `docker compose up -d --build`, then create the first administrator with `docker compose run --rm web python -m app.cli create-admin`. The data lives in a Docker volume on the server's own disk. Run only one copy. Step-by-step instructions, backups and upgrades are in `docs/deploy.md` (guide E). For Kubernetes clusters, ready-made files and steps are in `deploy/kubernetes/README.md` (also guide F in `docs/deploy.md`); they run exactly one copy as well.
 
 | | Minimum | Recommended |
 |---|---|---|
@@ -269,7 +269,7 @@ There are two ways to run it on the server:
 | **Disk** | 40 GB SSD (attached to the server, not a network file system) | 100 GB SSD, or 40 GB plus a Cloudflare R2 bucket for the uploaded files |
 | **Operating system** | Ubuntu 22.04/24.04 LTS | Ubuntu 24.04 LTS |
 | **Software (3a)** | Python 3.12, Caddy | Python 3.12, Caddy, Litestream for continuous off-site database backup |
-| **Software (3b, planned)** | Docker Engine 24 or newer | Docker Engine 24 or newer with Compose |
+| **Software (3b)** | Docker Engine 24 or newer | Docker Engine 24 or newer with Compose |
 | **Network** | A domain name pointing at the server; ports 80 and 443 open | The same |
 
 Notes:

@@ -74,7 +74,7 @@ dev = [
 ]
 
 [[tool.mypy.overrides]]
-module = ["sqlite_vec", "boto3", "boto3.*", "botocore", "botocore.*", "moto", "moto.*"]
+module = ["sqlite_vec", "yaml", "boto3", "boto3.*", "botocore", "botocore.*", "moto", "moto.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

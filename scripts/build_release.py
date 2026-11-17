@@ -31,6 +31,9 @@ ROOT_FILES = (
     "THIRD_PARTY_NOTICES.md",
     ".env.example",
     "CLAUDE.md",
+    "Dockerfile",
+    ".dockerignore",
+    "compose.yaml",
 )
 ROOT_DIRS = ("backend", "docs", "deploy")
 

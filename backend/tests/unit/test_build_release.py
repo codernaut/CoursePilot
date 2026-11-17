@@ -38,6 +38,8 @@ def make_repo(root: Path, version: str = "0.2.0") -> Path:
     (root / "docs" / "a.md").write_text("docs\n", encoding="utf-8")
     (root / "deploy").mkdir()
     (root / "deploy" / "coursepilot-web.service").write_text("[Unit]\n", encoding="utf-8")
+    (root / "deploy" / "kubernetes").mkdir()
+    (root / "deploy" / "kubernetes" / "deployment.yaml").write_text("kind: x\n", encoding="utf-8")
     for name in br.ROOT_FILES:
         (root / name).write_text(f"{name}\n", encoding="utf-8")
     return root
@@ -146,6 +148,10 @@ def test_build_contains_required_files_and_version_file(tmp_path: Path) -> None:
         "backend/app/main.py",
         "docs/a.md",
         "deploy/coursepilot-web.service",
+        "deploy/kubernetes/deployment.yaml",
+        "Dockerfile",
+        ".dockerignore",
+        "compose.yaml",
     )
     for required in required_files:
         assert required in found
@@ -154,6 +160,18 @@ def test_build_contains_required_files_and_version_file(tmp_path: Path) -> None:
         assert archive.read("coursepilot-v0.2.0/VERSION") == f"0.2.0 {SHA}\n".encode()
     expected = hashlib.sha256(zip_path.read_bytes()).hexdigest()
     assert checksum_path.read_text(encoding="utf-8") == f"{expected}  {zip_path.name}\n"
+
+
+def test_the_real_repository_packages_the_docker_files() -> None:
+    files = {p.as_posix() for p in br.collect_files(Path(__file__).resolve().parents[3])}
+    for expected in (
+        "Dockerfile",
+        ".dockerignore",
+        "compose.yaml",
+        "deploy/kubernetes/deployment.yaml",
+        "deploy/kubernetes/kustomization.yaml",
+    ):
+        assert expected in files
 
 
 def test_build_excludes_env_data_databases_and_caches(tmp_path: Path) -> None:

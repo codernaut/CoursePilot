@@ -8,10 +8,12 @@ CoursePilot is one Python application (web app + JSON API) plus one background w
 | [B. University Windows server](#b-university-windows-server) | Your IT department gives you a Windows machine |
 | [C. One machine on a trusted LAN](#c-one-machine-on-a-trusted-lan-no-https) | Small closed network, no TLS (`ALLOW_INSECURE_HTTP`) |
 | [D. PaaS with a persistent disk](#d-paas-with-a-persistent-disk-flyio-render) | Fly.io volume or Render disk |
+| [E. Docker Compose](#e-docker-compose) | Optional: a host that already runs containers |
+| [F. Kubernetes](#f-kubernetes) | Optional: a cluster, one replica |
 
 The common topics (R2 bucket, backups, upgrades, monitoring, rotating keys) are at the end.
 
-**Deployment profiles and sizing.** The user manual chapter "Deployment options and system requirements" describes the three profiles with hardware sizing: (1) on-premises with cloud AI (guides A-C), (2) on-premises with local AI models (planned, M11: not in the code yet, only Anthropic and Gemini are supported), (3) everything in the cloud, as a service (guides A and D) or as a Docker container (planned, M10). Whatever the profile, run a single instance with SQLite on the server's own disk or block volume, never on a network file system.
+**Deployment profiles and sizing.** The user manual chapter "Deployment options and system requirements" describes the three profiles with hardware sizing: (1) on-premises with cloud AI (guides A-C), (2) on-premises with local AI models (planned, M11: not in the code yet, only Anthropic and Gemini are supported), (3) everything in the cloud, as a service (guides A and D) or as a Docker container (guide E for Docker Compose, guide F for Kubernetes; Docker stays optional). Whatever the profile, run a single instance with SQLite on the server's own disk or block volume, never on a network file system.
 
 ## What runs where
 
@@ -121,6 +123,30 @@ These platforms build a container image **on their servers** from your repositor
 - **First admin**: open a shell on the instance (`fly ssh console`, Render shell) and run `python -m app.cli create-admin`.
 - **Backups**: platform volume snapshots plus `python -m app.cli backup --out /data/backups --keep 7` on a schedule (Render cron job needs the same disk, so prefer Fly machines' scheduled commands or Litestream to R2 from `deploy/litestream.yml`).
 - Free tiers that sleep or have ephemeral disks are not suitable.
+
+## E. Docker Compose
+
+An optional, ready-made container image runs the web app and the worker. Docker is never required: guides A-D do not use it, and development, tests, `setup.*` and `start.*` stay Docker-free. Use this when your host already runs containers (a VPS with Docker, a cloud VM).
+
+**Prerequisites**: Docker Engine 24 or newer with the Compose plugin, a DNS name and HTTPS in front (Caddy, a cloud load balancer or a tunnel), 2 vCPU / 4 GB minimum (see the manual's sizing).
+
+1. Get the source (a release zip or `git clone`) and, in the repository root, create `.env`: copy `.env.example`, or reuse the file `setup.*` wrote. For production set `APP_ENV=production`, `BASE_URL=https://study.example.edu`, a `SECRET_KEY` of 32+ random characters, `BEHIND_PROXY=true`, and your API keys. The port is published on `127.0.0.1` only by default (for a reverse proxy on the same host); set `WEB_BIND=0.0.0.0` in the shell or a Compose `.env` to reach it from other machines. Paths and the bind address inside the container are fixed by `compose.yaml` (`DATA_DIR=/data` and so on), whatever `.env` says.
+2. Build and start: `docker compose up -d --build`. The web container runs the migrations, the worker starts once web is healthy. Both share the named volume `coursepilot-data` (`/data`: databases, checkpoints, uploaded files, backups).
+3. First admin and structure:
+   ```bash
+   docker compose run --rm web python -m app.cli create-admin
+   docker compose run --rm web python -m app.cli seed-structure
+   docker compose run --rm web python -m app.cli check --production
+   ```
+4. HTTPS: put a reverse proxy in front (the commented `caddy` service in `compose.yaml`, or `deploy/Caddyfile` on the host with `reverse_proxy 127.0.0.1:8000`).
+5. **Backups**: `docker compose run --rm web python -m app.cli backup --out /data/backups --keep 7`, then copy the folder off the host (`docker compose cp web:/data/backups ./backups` works while the stack runs). The backup does not include `.env`. Restore: `docker compose stop`, then `docker compose run --rm web python -m app.cli restore /data/backups/<folder>`, then `docker compose up -d`.
+6. **Upgrade**: back up, update the source, `docker compose up -d --build`. Migrations run on start. Logs: `docker compose logs -f web worker`.
+
+Rules: **one** instance (never `--scale`), `/data` on the host's local disk (the default named volume is; never mount NFS/SMB there), no Docker socket or privileged mode needed. The image runs as a non-root user (uid 10001). OCR (tesseract) is not included because `OCR_ENABLED` is off by default; the top of the `Dockerfile` says how to add it. The image is built locally or by your CI; the project does not publish images yet.
+
+## F. Kubernetes
+
+Plain manifests for one instance are in `deploy/kubernetes/` (namespace, 20 Gi `ReadWriteOnce` volume, one Deployment, Service, nginx Ingress, kustomization). One pod holds two containers, `web` (`app.cli serve`) and `worker` (`app.worker`), sharing the volume; `replicas: 1` with `strategy: Recreate` is deliberate (SQLite has one writer, login throttling is in-process, the volume is `ReadWriteOnce`). Settings come from a secret: `kubectl create secret generic coursepilot-env -n coursepilot --from-env-file=.env` (unquoted values, no inline comments). The full steps (build and push the image, secret, `kubectl apply -k deploy/kubernetes`, first admin with `kubectl exec`, backups, upgrades) are in `deploy/kubernetes/README.md`. The volume must be block storage, not NFS/SMB.
 
 ## Backups and the restore drill
 
