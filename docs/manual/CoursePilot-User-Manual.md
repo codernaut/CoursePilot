@@ -42,6 +42,8 @@ Throughout this manual, a line such as **Who: Students, Faculty** tells you whic
 - At least one **API key**: one for the chat model (Anthropic Claude or Google Gemini) and one for embeddings (Gemini, Voyage or OpenAI). A Gemini key can serve both. A Tavily key for web search is optional.
 - No Docker, no Node.js, no database server. Setup installs everything with Python tools.
 
+These are the requirements to try CoursePilot. For server sizing and the three ways to run it (on-premises with cloud AI, on-premises with local AI, or fully in the cloud), see **Deployment options and system requirements** below.
+
 ## Getting the code
 
 Either:
@@ -189,6 +191,93 @@ python -m uv run python -m app.cli backup
 ```
 
 Options: `--out DIR` to choose the destination and `--keep N` to keep only the last N backups. A dated folder with both databases, the uploaded files and a checksum manifest is created. The backup does **not** include `.env`; copy that separately. To restore, stop the app and worker, then run `python -m uv run python -m app.cli restore <backup folder>` (it verifies checksums and asks for confirmation). Production deployments (HTTPS, services, schedules) are covered in `docs/deploy.md`.
+
+# Deployment options and system requirements
+
+**Who: whoever decides where CoursePilot runs (usually IT or the administrator).**
+
+CoursePilot can be run in three ways. They differ in **where the application runs** and **where the AI models run**. In all three, the database and the uploaded files stay on the server that runs CoursePilot (or, optionally, files in your own Cloudflare R2 bucket).
+
+| | Option 1: On-premises, cloud AI | Option 2: On-premises, local AI | Option 3: Everything in the cloud |
+|---|---|---|---|
+| **Application runs on** | Your own computer or server | Your own server with a GPU | A rented cloud server (VPS) |
+| **AI models** | Anthropic Claude or Google Gemini (cloud APIs) | Open models on your own hardware | Anthropic Claude or Google Gemini (cloud APIs) |
+| **What leaves your network** | Questions, retrieved passages and document text for embedding go to the AI provider; web-search queries go to Tavily | Nothing, if web search is off | Everything is hosted outside; the same AI traffic as option 1 |
+| **Status** | **Available now** | **Planned** (not available yet) | **Available now** as a service; **Docker container planned** |
+| **Best for** | Most universities; quick start | Strict data-protection rules, no cloud AI allowed | No local server; access from anywhere over HTTPS |
+
+> **The figures below are sizing guidance**, not guarantees. They assume one programme (27 modules) with up to a few thousand documents and up to about 100 students chatting at the same time. Start with the "recommended" column and watch the **Usage** and **Jobs** pages.
+
+## Option 1: On-premises with cloud AI models
+
+CoursePilot runs on a machine you control (a Windows or Linux server, or even a desktop PC for a small group). The chat model (Anthropic Claude or Google Gemini), the embeddings (Gemini, Voyage or OpenAI) and the optional web search (Tavily) are cloud services reached over the internet. This is how CoursePilot works today, set up with `setup.bat` / `./setup.sh` as described above.
+
+| | Minimum | Recommended |
+|---|---|---|
+| **CPU** | 2 cores | 4 cores |
+| **Memory (RAM)** | 4 GB | 8 GB (16 GB if faculty often upload books of 1,000+ pages) |
+| **Disk** | 20 GB SSD | 100 GB SSD; allow about **2.5 x** the size of the uploaded material (originals + index), plus space for backups |
+| **GPU** | Not needed | Not needed |
+| **Operating system** | Windows 10/11 or Server 2019+, Ubuntu 22.04/24.04 or another current Linux, macOS 13+ | A server OS, running as a service (see `docs/deploy.md`) |
+| **Software** | Python 3.12 | Python 3.12; Caddy for HTTPS when others connect |
+| **Network** | Outbound HTTPS (port 443) to the AI providers and Tavily | The same, plus a fixed address or host name for users |
+
+Notes:
+
+- The heavy work (understanding questions and writing answers) happens at the AI provider, so a modest server is enough. Uploads are the only CPU-heavy moment: a 1,000-page PDF is parsed in a few minutes and briefly uses up to 1-2 GB of memory.
+- Keep the `data/` folder on a **local SSD**, never on a network share.
+- Costs are mostly the AI provider's per-token charges, not hardware. See **Usage** for tokens per day.
+
+## Option 2: On-premises with local AI models (planned)
+
+> **Not available yet.** The current version cannot use local models: setup offers only **Anthropic** and **Gemini** for chat, and Gemini, Voyage or OpenAI for embeddings. Local models are planned as a **third AI provider option** next to Anthropic and Gemini (and a local embedding option). This needs a software update; CoursePilot is designed for it, because the chat model and the embeddings each sit behind one small interface. This section tells you what hardware to plan for.
+
+Everything, including the AI, runs on your own hardware, for example with **Ollama** serving an open chat model (such as Llama, Qwen, Mistral or Gemma) and a local embedding model. With web search turned off (`WEB_SEARCH_PROVIDER=none`), no question or document leaves your network.
+
+The GPU decides the answer quality and speed:
+
+| | Small (pilot, 1 module, ~10 concurrent users) | Recommended (whole programme, ~30-50 concurrent) | Large (best local quality, ~100 concurrent) |
+|---|---|---|---|
+| **Chat model size** | 7-9 billion parameters (quantised) | 14-32 billion parameters (quantised) | 70 billion parameters (quantised) |
+| **GPU memory (VRAM)** | 12-16 GB (e.g. one RTX 4060 Ti 16 GB or RTX 3060 12 GB) | 24-48 GB (e.g. one RTX 4090 / L4 24 GB, or one 48 GB card) | 80 GB or more (e.g. one 80 GB data-centre GPU or two 48 GB cards) |
+| **CPU** | 8 cores | 12-16 cores | 16-32 cores |
+| **Memory (RAM)** | 32 GB | 64 GB | 128 GB |
+| **Disk** | 200 GB NVMe SSD | 500 GB NVMe SSD | 1 TB NVMe SSD |
+| **Operating system** | Linux (Ubuntu 22.04/24.04) recommended; Windows 11 works | Linux | Linux |
+
+Notes:
+
+- Model files are large (5-40 GB each), so most of the disk is for models, not for course material.
+- Local embedding models are small and run well on the CPU or the same GPU. Changing the embedding model means re-processing all material once (`reindex-all`).
+- Without a GPU, a small model runs on the CPU only at a few words per second: fine for testing, too slow for a class.
+- Expect answers that are good but not as strong as the best cloud models, especially for long or subtle questions. Try it on your own material before committing.
+
+## Option 3: Everything hosted in the cloud
+
+CoursePilot runs on a rented cloud server and users reach it over the internet with HTTPS. The AI models are the same cloud APIs as option 1. (A cloud server with a GPU can also host option 2's local models; size it with option 2's table.)
+
+There are two ways to run it on the server:
+
+**3a. As a service (available now).** Install CoursePilot on a Linux virtual server (VPS) exactly as on a local machine, run the web app and the worker as two services (systemd), and put **Caddy** in front for automatic HTTPS certificates. Step-by-step instructions, ready-made service files and backup schedules are in `docs/deploy.md`.
+
+**3b. As a Docker container (planned).** A ready-made container image with the web app and the worker, a volume for `data/` and the `.env` settings, so the same setup runs on any server or platform that runs containers. Docker remains optional: installation without Docker (option 1 and 3a) stays fully supported.
+
+| | Minimum | Recommended |
+|---|---|---|
+| **Virtual CPUs** | 2 vCPU | 4 vCPU |
+| **Memory (RAM)** | 4 GB | 8 GB |
+| **Disk** | 40 GB SSD (attached to the server, not a network file system) | 100 GB SSD, or 40 GB plus a Cloudflare R2 bucket for the uploaded files |
+| **Operating system** | Ubuntu 22.04/24.04 LTS | Ubuntu 24.04 LTS |
+| **Software (3a)** | Python 3.12, Caddy | Python 3.12, Caddy, Litestream for continuous off-site database backup |
+| **Software (3b, planned)** | Docker Engine 24 or newer | Docker Engine 24 or newer with Compose |
+| **Network** | A domain name pointing at the server; ports 80 and 443 open | The same |
+
+Notes:
+
+- Run **one** server (one copy of the app). CoursePilot keeps its data in SQLite on the server's own disk, which supports one writing process per database; it is not meant to run as several copies behind a load balancer. One 4 vCPU / 8 GB server comfortably serves a programme.
+- Do not put `data/` on a network file system (such as NFS or a cloud "file share"); use the server's own SSD or a block-storage volume.
+- Keep backups **off the server**: a scheduled `app.cli backup` copied elsewhere, or Litestream to an object store (see `docs/deploy.md`).
+- Set `APP_ENV=production` and an `https://` `BASE_URL`; run `python -m app.cli check --production` before going live.
 
 # Signing in and first steps
 

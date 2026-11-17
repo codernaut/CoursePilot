@@ -32,7 +32,15 @@ CoursePilot is a web-hosted **RAG (retrieval-augmented generation) study assista
 - LMS integrations (Moodle, Canvas, Blackboard): plan for them, but don't build them in v1.
 - Video/audio transcription (planned for v2).
 - Self-registration, per-module permissions, multiple institutions.
-- Docker, Node/npm, or any externally installed server (Postgres, Redis, MinIO…). Everything installs with pip/uv.
+- Node/npm, or any externally installed server (Postgres, Redis, MinIO…). Everything installs with pip/uv. Docker is never *required* (development, tests, CI, setup and the service install stay Docker-free); an optional container image for cloud hosting is the planned M10 (§14).
+
+### Deployment profiles
+
+Three supported ways to run CoursePilot, documented with sizing in the user manual ("Deployment options and system requirements") and `docs/deploy.md`:
+
+1. **On-premises, cloud AI** (available): app + worker on the institution's machine; Anthropic/Gemini chat, Gemini/Voyage/OpenAI embeddings, Tavily.
+2. **On-premises, local AI** (planned, M11 in §14; NOT in the code yet, only `anthropic` and `gemini` exist): nothing leaves the network when `WEB_SEARCH_PROVIDER=none`; sized by GPU VRAM.
+3. **Everything in the cloud** (available as a service on a VPS with systemd + Caddy, `deploy/`; **Docker image planned, M10**). Always a single instance: SQLite on the server's local disk or block volume, never a network file system, no horizontal scaling.
 
 ---
 
@@ -262,7 +270,11 @@ Everything runs locally without Docker: `pytest` with temporary SQLite files and
 
 ## 14. Build order (milestones)
 
-M0 to M8 and the UI redesign are done (§2). Any further work follows the same rules: one well-bounded milestone at a time, finished and committed in a working state with tests, and recorded in docs/decisions/history.md with one line added to §2. The original milestone scopes: docs/decisions/history.md ("Moved detail from CLAUDE.md §14").
+M0 to M9 and the UI redesign are done (§2). Any further work follows the same rules: one well-bounded milestone at a time, finished and committed in a working state with tests, and recorded in docs/decisions/history.md with one line added to §2. The original milestone scopes: docs/decisions/history.md ("Moved detail from CLAUDE.md §14").
+
+**Next: M10, optional Docker image for cloud hosting (deployment profile 3b; start only when the owner says so).** Scope: one `Dockerfile` (Python 3.12 slim, `uv sync --frozen`, non-root user, the same `app.cli` entry points) running the web app and the worker (two services in a `compose.yaml` sharing one `data/` volume, or one container with `serve --with-worker`); configuration only through `.env` / environment variables; migrations on start; a health check on `/api/v1/health/ready`; `data/` as a local volume (never a network file system); one replica only. No change to the Docker-free install, setup or CI; the image is an additional release artifact. Record the decision in an ADR.
+
+**Then: M11, local AI models (deployment profile 2; needs code changes; start only when the owner says so).** A third chat provider next to `anthropic` and `gemini` (e.g. `LLM_PROVIDER=ollama` with `OLLAMA_BASE_URL`, a new module behind `llm/factory.py`, offered by setup) and a local embedding provider behind the embedder interface (changing to it needs `reindex-all`, §7.4). Not in the code today: `Settings` rejects any other provider.
 
 ---
 
@@ -270,7 +282,7 @@ M0 to M8 and the UI redesign are done (§2). Any further work follows the same r
 
 - University SSO / Google OAuth (the auth interface is designed for it); LMS (LTI 1.3) integration.
 - Per-module or per-document permissions (hook point: `retrieval/access.py`).
-- Local models through Ollama (new module behind `llm/factory.py` and the embedder interface); `local` sentence-transformers embeddings.
+- Local models through Ollama (new module behind `llm/factory.py` and the embedder interface); `local` sentence-transformers embeddings. Scheduled as M11 (§14); it unlocks deployment profile 2 (on-premises, local AI; §1).
 - Lecture video/audio transcription (Whisper) with timestamp citations.
 - Practice-question and flashcard generation from material; study plans.
 - Per-module instructor controls for "hint mode" vs "full answer mode".

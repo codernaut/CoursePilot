@@ -11,6 +11,8 @@ CoursePilot is one Python application (web app + JSON API) plus one background w
 
 The common topics (R2 bucket, backups, upgrades, monitoring, rotating keys) are at the end.
 
+**Deployment profiles and sizing.** The user manual chapter "Deployment options and system requirements" describes the three profiles with hardware sizing: (1) on-premises with cloud AI (guides A-C), (2) on-premises with local AI models (planned, M11: not in the code yet, only Anthropic and Gemini are supported), (3) everything in the cloud, as a service (guides A and D) or as a Docker container (planned, M10). Whatever the profile, run a single instance with SQLite on the server's own disk or block volume, never on a network file system.
+
 ## What runs where
 
 - **Web app**: `python -m app.cli serve` (migrates, then serves on `APP_HOST:APP_PORT`; no browser). `start.*` is the local dev launcher and stays that.
