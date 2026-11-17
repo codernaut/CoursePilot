@@ -58,6 +58,10 @@ services:
   worker:
     <<: *coursepilot
     command: ["python", "-m", "app.worker"]
+    # The image's HEALTHCHECK probes the web port, which the worker does not serve: without this
+    # the worker would always be "unhealthy" (and `docker compose up --wait` would fail).
+    healthcheck:
+      disable: true
     # Starts after web is healthy, i.e. after the migrations have run.
     depends_on:
       web:

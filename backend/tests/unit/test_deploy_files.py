@@ -141,6 +141,9 @@ def test_compose_runs_web_and_worker_on_one_volume() -> None:
     assert services["worker"]["depends_on"]["web"]["condition"] == "service_healthy"
     assert "ports" not in services["worker"]
     assert "deploy" not in services["web"]  # no replicas here: single instance only
+    # The image HEALTHCHECK probes the web port; the worker serves none, so it must be disabled
+    # there or `docker compose up --wait` never sees a healthy stack (failed the first CI run).
+    assert services["worker"]["healthcheck"] == {"disable": True}
 
 
 def test_compose_overrides_paths_and_checks_a_real_health_route() -> None:
