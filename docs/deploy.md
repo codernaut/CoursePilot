@@ -131,13 +131,14 @@ An optional, ready-made container image runs the web app and the worker. Docker 
 **Prerequisites**: Docker Engine 24 or newer with the Compose plugin, a DNS name and HTTPS in front (Caddy, a cloud load balancer or a tunnel), 2 vCPU / 4 GB minimum (see the manual's sizing).
 
 1. Get the source (a release zip or `git clone`) and, in the repository root, create `.env`: copy `.env.example`, or reuse the file `setup.*` wrote. For production set `APP_ENV=production`, `BASE_URL=https://study.example.edu`, a `SECRET_KEY` of 32+ random characters, `BEHIND_PROXY=true`, and your API keys. The port is published on `127.0.0.1` only by default (for a reverse proxy on the same host); set `WEB_BIND=0.0.0.0` in the shell or a Compose `.env` to reach it from other machines. Paths and the bind address inside the container are fixed by `compose.yaml` (`DATA_DIR=/data` and so on), whatever `.env` says.
-2. Build and start: `docker compose up -d --build`. The web container runs the migrations, the worker starts once web is healthy. Both share the named volume `coursepilot-data` (`/data`: databases, checkpoints, uploaded files, backups).
+2. Build and start: `./docker-start.sh` (Linux, macOS) or `docker-start.bat` (Windows) does steps 2 and 3 for you: it builds the image only when it is missing (or with `--rebuild`), runs `docker compose up -d --wait`, `seed-structure` and `create-admin --if-missing` (asks only when no administrator exists), and opens `BASE_URL`; `docker-stop.*` runs `docker compose down` (the data volume is kept). By hand: `docker compose up -d --build`. The web container runs the migrations, the worker starts once web is healthy. Both share the named volume `coursepilot-data` (`/data`: databases, checkpoints, uploaded files, backups).
 3. First admin and structure:
    ```bash
    docker compose run --rm web python -m app.cli create-admin
    docker compose run --rm web python -m app.cli seed-structure
    docker compose run --rm web python -m app.cli check --production
    ```
+   Moving existing data from a non-Docker install: run `python -m app.cli backup` there, copy the backup folder into the volume (`docker compose cp <folder> web:/data/backups/`), stop both containers (`docker compose stop`), run `docker compose run --rm web python -m app.cli restore /data/backups/<folder> --yes` (a one-off container; web and worker must not be running), then `docker compose up -d`.
 4. HTTPS: put a reverse proxy in front (the commented `caddy` service in `compose.yaml`, or `deploy/Caddyfile` on the host with `reverse_proxy 127.0.0.1:8000`).
 5. **Backups**: `docker compose run --rm web python -m app.cli backup --out /data/backups --keep 7`, then copy the folder off the host (`docker compose cp web:/data/backups ./backups` works while the stack runs). The backup does not include `.env`. Restore: `docker compose stop`, then `docker compose run --rm web python -m app.cli restore /data/backups/<folder>`, then `docker compose up -d`.
 6. **Upgrade**: back up, update the source, `docker compose up -d --build`. Migrations run on start. Logs: `docker compose logs -f web worker`.

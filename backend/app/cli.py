@@ -401,6 +401,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("setup", help="interactive first-time setup (writes .env, migrates, seeds)")
     admin = sub.add_parser("create-admin", help="create an administrator (password is prompted)")
     admin.add_argument("--email", help="email address (prompted when omitted)")
+    admin.add_argument(
+        "--if-missing",
+        action="store_true",
+        help="do nothing when an administrator already exists (for scripts)",
+    )
     sub.add_parser("seed-structure", help="create missing years, blocks and modules")
     sub.add_parser("migrate", help="apply database migrations")
     check = sub.add_parser("check", help="verify SQLite, FTS5 and sqlite-vec")
@@ -483,6 +488,9 @@ def main(argv: Sequence[str] | None = None, *, prompter: Prompter | None = None)
         p.say(f"Created {run_seed(settings)} new structure rows.")
     elif args.command == "create-admin":
         run_migrate(settings)
+        if args.if_missing and _admin_exists(settings):
+            p.say("An administrator already exists.")
+            return 0
         return run_create_admin(settings, p, email=args.email)
     elif args.command == "reindex-all":
         run_migrate(settings)

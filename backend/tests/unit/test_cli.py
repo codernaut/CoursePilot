@@ -235,7 +235,7 @@ def test_start_stops_worker_on_ctrl_c(settings: Settings) -> None:
     assert code == 0 and proc.terminated
 
 
-@pytest.mark.parametrize("script", ["setup.sh", "start.sh"])
+@pytest.mark.parametrize("script", ["setup.sh", "start.sh", "docker-start.sh", "docker-stop.sh"])
 def test_shell_scripts_use_lf_line_endings(script: str) -> None:
     """A CRLF shebang ('sh\r') makes the script fail on Linux and macOS."""
     data = (REPO_ROOT / script).read_bytes()
@@ -248,3 +248,35 @@ def test_gitattributes_pins_script_line_endings() -> None:
     rules = (REPO_ROOT / ".gitattributes").read_text(encoding="utf-8")
     assert "*.sh text eol=lf" in rules
     assert "*.bat text eol=crlf" in rules
+
+
+def test_create_admin_if_missing_skips_when_an_admin_exists(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
+    """docker-start.* run `create-admin --if-missing` on every start: it prompts only once."""
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    first = Scripted(["first@example.edu", "", PASSWORD, PASSWORD])
+    assert cli.main(["create-admin", "--if-missing"], prompter=first) == 0
+    again = Scripted([])  # any prompt would fail: Scripted has no answers left
+    assert cli.main(["create-admin", "--if-missing"], prompter=again) == 0
+    assert any("already exists" in s for s in again.said)
+    assert _db(settings).execute("SELECT count(*) FROM users").fetchone() == (1,)
+
+
+@pytest.mark.parametrize("name", ["docker-start.sh", "docker-start.bat"])
+def test_docker_start_scripts_build_when_missing_and_bootstrap(name: str) -> None:
+    text = (REPO_ROOT / name).read_text(encoding="utf-8")
+    assert "docker image inspect" in text and "--rebuild" in text  # build only when needed
+    assert "docker compose build" in text and "docker compose up -d --wait" in text
+    assert "app.cli seed-structure" in text and "create-admin --if-missing" in text
+    assert ".env.example" in text  # a missing .env is created from the template
+
+
+@pytest.mark.parametrize("name", ["docker-stop.sh", "docker-stop.bat"])
+def test_docker_stop_scripts_keep_the_data_volume(name: str) -> None:
+    commands = [
+        line
+        for line in (REPO_ROOT / name).read_text(encoding="utf-8").splitlines()
+        if line.strip().startswith("docker ")
+    ]
+    assert commands == ["docker compose down"]  # never `down -v`, which deletes all data

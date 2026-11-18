@@ -168,6 +168,10 @@ def test_the_real_repository_packages_the_docker_files() -> None:
         "Dockerfile",
         ".dockerignore",
         "compose.yaml",
+        "docker-start.bat",
+        "docker-start.sh",
+        "docker-stop.bat",
+        "docker-stop.sh",
         "deploy/kubernetes/deployment.yaml",
         "deploy/kubernetes/kustomization.yaml",
     ):

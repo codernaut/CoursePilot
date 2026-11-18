@@ -97,7 +97,7 @@ Choose these unless a decision in this file is explicitly changed. Nothing here 
 
 ## 4. Repository layout
 
-Top level: `CLAUDE.md`, `README.md`, `LICENSE`, `.env.example` (every env var; the real `.env` is at the repo root), `setup.*` / `start.*`, `THIRD_PARTY_NOTICES.md`, `VERSION` (release zips only), `Dockerfile`, `.dockerignore`, `compose.yaml` (optional image, web + worker; build context = repo root), `deploy/` (systemd, Caddy, Windows tasks, Litestream, Cloudflare Tunnel examples, `kubernetes/` manifests), `scripts/build_release.py`, `scripts/build_manual.py` and `scripts/manual_demo.py` (rebuild the manual; throwaway demo for its screenshots), `.github/workflows/` (`ci.yml`, `release.yml`), `data/` (gitignored, `DATA_DIR`), `docs/` (`architecture.md`, `deploy.md`, `manual/` (user manual source `CoursePilot-User-Manual.md`, `manual.css`, `img/` screenshots), `decisions/` with ADRs `NNNN-title.md` and `history.md`, the per-milestone decision log), `backend/`.
+Top level: `CLAUDE.md`, `README.md`, `LICENSE`, `.env.example` (every env var; the real `.env` is at the repo root), `setup.*` / `start.*`, `docker-start.*` / `docker-stop.*` (optional Docker launchers), `THIRD_PARTY_NOTICES.md`, `VERSION` (release zips only), `Dockerfile`, `.dockerignore`, `compose.yaml` (optional image, web + worker; build context = repo root), `deploy/` (systemd, Caddy, Windows tasks, Litestream, Cloudflare Tunnel examples, `kubernetes/` manifests), `scripts/build_release.py`, `scripts/build_manual.py` and `scripts/manual_demo.py` (rebuild the manual; throwaway demo for its screenshots), `.github/workflows/` (`ci.yml`, `release.yml`), `data/` (gitignored, `DATA_DIR`), `docs/` (`architecture.md`, `deploy.md`, `manual/` (user manual source `CoursePilot-User-Manual.md`, `manual.css`, `img/` screenshots), `decisions/` with ADRs `NNNN-title.md` and `history.md`, the per-milestone decision log), `backend/`.
 
 `backend/`: `pyproject.toml`, `uv.lock`, `alembic.ini`, `migrations/`, `app/`, `tests/` (`unit/`, `integration/`, `fixtures/`, `evals/`).
 
@@ -304,6 +304,8 @@ setup.bat            # Windows
 ./setup.sh           # macOS / Linux
 
 # optional, only for container hosting (guide E/F in docs/deploy.md; needs .env in the repo root)
+docker-start.bat / ./docker-start.sh [--rebuild]   # build if missing, up --wait, seed, first admin once, open browser
+docker-stop.bat / ./docker-stop.sh                 # docker compose down (data volume kept)
 docker compose up -d --build
 docker compose run --rm web python -m app.cli create-admin
 kubectl apply -k deploy/kubernetes     # see deploy/kubernetes/README.md
@@ -456,7 +458,7 @@ The `fake` provider values are accepted by `Settings` (so tests can select them)
 - **Config only through `app/core/config.py`.** Don't read `os.environ` anywhere else.
 - **Interfaces at the edges**: LLM, embeddings, web search, storage, auth and the job queue each sit behind a small protocol/ABC so they can be faked in tests and swapped later.
 - **Never weaken the access filter** or the "material first, web last" order to make a test pass. Fix the test or the code properly.
-- **Scripts stay thin.** `setup.*` / `start.*` call into Python (`python -m app.cli …`) so the logic is testable.
+- **Scripts stay thin.** `setup.*` / `start.*` call into Python (`python -m app.cli …`) so the logic is testable. `docker-start.*` / `docker-stop.*` only call `docker` (the host may have no Python); the app logic they need runs inside the container (`seed-structure`, `create-admin --if-missing`).
 - **Fixtures**: use only material we wrote ourselves or that is public domain / openly licensed. Never commit real copyrighted course material.
 - **Dependencies** must be AGPL-compatible (§2) and pinned with compatible ranges. Check the licence before adding one.
 - **Ask the owner before** changing the stack in §3, adding a paid third-party service, changing the licence, or doing anything destructive to production data.
