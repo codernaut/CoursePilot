@@ -515,3 +515,130 @@ def test_render_keeps_the_value_dotenv_reads(tmp_path: Path, line: str) -> None:
     after.write_text("\n".join(rendered) + "\n", encoding="utf-8")
     assert dotenv_values(after)[key] == dotenv_values(before)[key]
     assert EnvFile([line]).get(key) == dotenv_values(before)[key]
+
+
+# --- local AI (M11) ------------------------------------------------------------------------
+
+
+def test_menus_list_hosted_providers_first_and_local_last() -> None:
+    from app.setup_flow import EMBEDDING_DEFAULTS, LLM_DEFAULTS
+
+    assert list(LLM_DEFAULTS) == ["anthropic", "gemini", "ollama", "openai_compatible"]
+    assert list(EMBEDDING_DEFAULTS) == [
+        "gemini", "voyage", "openai", "ollama", "openai_compatible", "local",
+    ]  # fmt: skip
+    assert "fake" not in LLM_DEFAULTS and "fake" not in EMBEDDING_DEFAULTS
+
+
+def test_choosing_ollama_for_chat_and_embeddings(tmp_path: Path) -> None:
+    answers = [
+        "", "", "ollama",  # port, LAN, chat provider
+        "", "", "",  # Ollama address, chat model, fast model (all defaults)
+        "ollama", "", "",  # embedding provider, model, dimension (defaults)
+        "",  # Ollama address (embeddings)
+        "",  # Tavily key
+        *ADMIN_ANSWERS,
+    ]  # fmt: skip
+    code, p, _, env_path = _run(tmp_path, answers)
+    assert code == 0
+    env = EnvFile.load(env_path, EXAMPLE)
+    assert env.get("LLM_PROVIDER") == "ollama"
+    assert env.get("LLM_MODEL") == "qwen2.5:7b-instruct"
+    assert env.get("LLM_FAST_MODEL") == "qwen2.5:7b-instruct"
+    assert env.get("OLLAMA_BASE_URL") == "http://localhost:11434"
+    assert (env.get("EMBEDDING_PROVIDER"), env.get("EMBEDDING_MODEL")) == (
+        "ollama",
+        "nomic-embed-text",
+    )
+    assert env.get("EMBEDDING_DIM") == "768"
+    shown = p.everything_shown
+    assert "for testing" in shown and "AGENT_TIMEOUT_S" in shown and "ollama pull" in shown
+    assert "API key" not in "".join(q for q, secret in p.prompts if secret and "Anthropic" in q)
+    Settings(_env_file=env_path)  # the written file is valid
+
+
+def test_openai_compatible_chat_asks_for_address_key_and_model(tmp_path: Path) -> None:
+    answers = [
+        "", "", "openai_compatible",
+        "http://localhost:8001/v1/", "local-key-1",  # address, key (secret)
+        "my-model", "",  # chat model; fast model defaults to the chat model
+        "", "", "",  # embeddings: gemini defaults
+        GOOGLE_KEY, "",
+        *ADMIN_ANSWERS,
+    ]  # fmt: skip
+    code, p, _, env_path = _run(tmp_path, answers)
+    assert code == 0
+    env = EnvFile.load(env_path, EXAMPLE)
+    assert env.get("LOCAL_LLM_BASE_URL") == "http://localhost:8001/v1"
+    assert env.get("LOCAL_LLM_API_KEY") == "local-key-1"
+    assert (env.get("LLM_MODEL"), env.get("LLM_FAST_MODEL")) == ("my-model", "my-model")
+    assert "local-key-1" not in p.everything_shown  # never echoed
+    assert Settings(_env_file=env_path).llm_provider == "openai_compatible"
+
+
+def test_a_bad_local_address_is_asked_again(tmp_path: Path) -> None:
+    answers = [
+        "", "", "ollama",
+        "localhost:11434", "http://ollama:11434", "", "",
+        "", "", "", GOOGLE_KEY, "",
+        *ADMIN_ANSWERS,
+    ]  # fmt: skip
+    code, p, _, env_path = _run(tmp_path, answers)
+    assert code == 0
+    assert "must start with http" in p.everything_shown
+    assert EnvFile.load(env_path, EXAMPLE).get("OLLAMA_BASE_URL") == "http://ollama:11434"
+
+
+def test_local_embeddings_offer_the_install_and_run_it_on_yes(tmp_path: Path) -> None:
+    installs: list[int] = []
+    fake = FakeDeps()
+    deps = fake.build()
+
+    def install() -> bool:
+        installs.append(1)
+        return True
+
+    deps.install_local_embeddings = install
+    answers = [
+        "", "", "", "", "", ANTHROPIC_KEY,
+        "local", "", "",  # embedding provider, defaults: bge-small, 384
+        "y",  # install now?
+        "",  # Tavily
+        *ADMIN_ANSWERS,
+    ]  # fmt: skip
+    p = Scripted(answers)
+    env_path = tmp_path / ".env"
+    code = run_setup(p, deps, env_path=env_path, example_path=EXAMPLE)
+    assert code == 0 and installs == [1]
+    env = EnvFile.load(env_path, EXAMPLE)
+    assert (env.get("EMBEDDING_MODEL"), env.get("EMBEDDING_DIM")) == (
+        "BAAI/bge-small-en-v1.5",
+        "384",
+    )
+    assert "1-2 GB" in p.everything_shown and "Installed." in p.everything_shown
+
+
+def test_local_embeddings_install_declined_shows_the_command(tmp_path: Path) -> None:
+    deps = FakeDeps().build()
+    deps.install_local_embeddings = lambda: pytest.fail("must not install without a yes")
+    answers = ["", "", "", "", "", ANTHROPIC_KEY, "local", "", "", "n", "", *ADMIN_ANSWERS]
+    p = Scripted(answers)
+    code = run_setup(p, deps, env_path=tmp_path / ".env", example_path=EXAMPLE)
+    assert code == 0
+    assert "--extra local-embeddings" in p.everything_shown
+
+
+def test_openai_compatible_embeddings_require_a_model_and_dimension(tmp_path: Path) -> None:
+    answers = [
+        "", "", "", "", "", ANTHROPIC_KEY,
+        "openai_compatible", "bge-large", "abc", "1024",  # model, bad dim, dim
+        "http://emb:8002/v1",
+        "",
+        *ADMIN_ANSWERS,
+    ]  # fmt: skip
+    code, p, _, env_path = _run(tmp_path, answers)
+    assert code == 0
+    env = EnvFile.load(env_path, EXAMPLE)
+    assert (env.get("EMBEDDING_MODEL"), env.get("EMBEDDING_DIM")) == ("bge-large", "1024")
+    assert env.get("LOCAL_EMBEDDING_BASE_URL") == "http://emb:8002/v1"
+    assert "values per embedding" in p.everything_shown

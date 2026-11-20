@@ -290,6 +290,23 @@ def run_restore(settings: Settings, p: Prompter, folder: Path, *, yes: bool = Fa
     return 0
 
 
+def _install_local_embeddings() -> bool:
+    """``uv sync --extra local-embeddings`` (about 1-2 GB). False when it fails."""
+    import shutil
+
+    backend = Path(__file__).resolve().parents[1]
+    uv: list[str] = [sys.executable, "-m", "uv"]
+    if subprocess.run([*uv, "--version"], capture_output=True, check=False).returncode != 0:  # noqa: S603
+        found = shutil.which("uv")
+        if not found:
+            return False
+        uv = [found]
+    result = subprocess.run(  # noqa: S603
+        [*uv, "sync", "--extra", "local-embeddings"], cwd=backend, check=False
+    )
+    return result.returncode == 0
+
+
 def default_setup_deps() -> SetupDeps:
     def migrate(settings: Settings) -> None:
         from pathlib import Path
@@ -303,6 +320,7 @@ def default_setup_deps() -> SetupDeps:
         admin_exists=_admin_exists,
         create_admin=_create_admin,
         check_sqlite=check_sqlite_capabilities,
+        install_local_embeddings=_install_local_embeddings,
     )
 
 

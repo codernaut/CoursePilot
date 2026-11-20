@@ -46,3 +46,7 @@ Build and push a new tag, change `newTag` in `kustomization.yaml`, run `kubectl 
 - Resources match the manual's sizing (4 CPU / 8 GB node recommended); the worker's memory peaks when parsing very large PDFs.
 - Probes: readiness `/api/v1/health/ready`, liveness `/api/v1/health/live`.
 - OCR is not in the image (`OCR_ENABLED` is off); see the comment at the top of the `Dockerfile`.
+
+## Local AI
+
+There is no Ollama manifest here. To use local models, run Ollama or vLLM as a separate service (its own Deployment with a GPU node, or a host outside the cluster) and put its address in the secret: `OLLAMA_BASE_URL=http://ollama.ai.svc:11434` or `LOCAL_LLM_BASE_URL=http://vllm.ai.svc:8000/v1` (see `docs/deploy.md`, "Local AI"). Raise `AGENT_TIMEOUT_S` for slow servers. In-process embeddings need an image built with `--build-arg EXTRAS=local-embeddings`.

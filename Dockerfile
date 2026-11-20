@@ -14,9 +14,15 @@
 # `uv pip install pytesseract` in the builder, then set OCR_ENABLED=true.
 
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
+# Optional dependency extras, space separated. Empty = the normal image. In-process embeddings
+# (EMBEDDING_PROVIDER=local) need PyTorch (a very large layer):
+#   docker compose build --build-arg EXTRAS=local-embeddings
+# Chat and embeddings through an Ollama or OpenAI-compatible server need no extra.
 
 # ---- builder: resolve and install the locked runtime dependencies --------------------------------
 FROM ${PYTHON_IMAGE} AS builder
+
+ARG EXTRAS=""
 
 # uv.lock is written by a recent uv (lock revision 5); an old pinned uv may refuse it. CI uses the
 # latest uv too. The lock file, not uv, pins the dependencies.
@@ -32,11 +38,11 @@ WORKDIR /app/backend
 
 # Dependencies first, so this layer is cached until pyproject.toml or uv.lock change.
 COPY backend/pyproject.toml backend/uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN flags=""; for extra in $EXTRAS; do flags="$flags --extra $extra"; done;     uv sync --frozen --no-dev --no-install-project $flags
 
 # Then the application (the project itself is not a package: `package = false`).
 COPY backend/ ./
-RUN uv sync --frozen --no-dev
+RUN flags=""; for extra in $EXTRAS; do flags="$flags --extra $extra"; done;     uv sync --frozen --no-dev $flags
 
 # ---- runtime ------------------------------------------------------------------------------------
 FROM ${PYTHON_IMAGE} AS runtime

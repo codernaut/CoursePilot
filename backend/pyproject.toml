@@ -18,6 +18,8 @@ dependencies = [
     "langchain-anthropic>=1,<2",
     "langchain-core>=1,<2",
     "langchain-google-genai>=3,<5",
+    "langchain-ollama>=1,<2",
+    "langchain-openai>=1,<2",
     "langgraph>=1,<2",
     "langgraph-checkpoint-sqlite>=3,<4",
     "markdown-it-py>=4.2.0,<5.0.0",
@@ -33,8 +35,24 @@ dependencies = [
     "uvicorn[standard]>=0.54.0,<0.55.0",
 ]
 
+[project.optional-dependencies]
+# In-process embeddings (EMBEDDING_PROVIDER=local). Pulls in the CPU-only PyTorch build (see
+# [tool.uv.sources]: no NVIDIA CUDA packages, which are proprietary), so it is
+# never part of the default install: `uv sync --extra local-embeddings` (setup offers it).
+local-embeddings = ["sentence-transformers>=5,<6", "torch>=2.5,<3"]
+
 [tool.uv]
 package = false
+
+# PyTorch from its CPU-only index: the default PyPI wheel on Linux depends on ~15 proprietary
+# nvidia-* CUDA packages and triton, which the AGPL licence rule (CLAUDE.md section 2) excludes.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
 
 [tool.ruff]
 line-length = 100
@@ -74,7 +92,7 @@ dev = [
 ]
 
 [[tool.mypy.overrides]]
-module = ["sqlite_vec", "yaml", "boto3", "boto3.*", "botocore", "botocore.*", "moto", "moto.*"]
+module = ["sqlite_vec", "yaml", "boto3", "boto3.*", "botocore", "botocore.*", "moto", "moto.*", "torch", "sentence_transformers"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

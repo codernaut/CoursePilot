@@ -1,7 +1,9 @@
 """Embedding providers behind one small interface (CLAUDE.md section 7.4).
 
 Providers: ``gemini`` (gemini-embedding-001), ``voyage`` (voyage-3.5), ``openai``
-(text-embedding-3-small) and ``fake`` (tests only).
+(text-embedding-3-small), the local-AI providers ``ollama`` (an Ollama server),
+``openai_compatible`` (any server with ``/v1/embeddings``) and ``local`` (sentence-transformers
+inside this process, an optional extra) and ``fake`` (tests only).
 
 Why plain ``httpx`` and not the vendor SDKs: each provider needs exactly one JSON POST. The SDKs
 (google-genai, voyageai, openai) would add three large dependency trees, import-time cost and their
@@ -21,12 +23,14 @@ import random
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Sequence
+from pathlib import Path
 from typing import Any, Protocol
 
 import httpx
 
 from app.core.config import Settings
 from app.core.logging import get_logger
+from app.ingestion.prefixes import resolve_prefixes
 
 log = get_logger(__name__)
 
@@ -72,6 +76,29 @@ def normalize(vector: Sequence[float]) -> list[float]:
     return [float(v) / norm for v in vector]
 
 
+def validate_vectors(
+    vectors: list[list[float]], *, count: int, dim: int, label: str
+) -> list[list[float]]:
+    """Check count, length and sanity of the vectors a provider returned; return them normalised."""
+    if len(vectors) != count:
+        raise EmbeddingError(
+            f"The {label} embedding service returned {len(vectors)} vectors for {count} texts."
+        )
+    for vector in vectors:
+        if len(vector) != dim:
+            raise EmbeddingError(
+                f"The {label} embedding service returned vectors of size {len(vector)}, "
+                f"but EMBEDDING_DIM is {dim}. Check EMBEDDING_MODEL and EMBEDDING_DIM, "
+                "then run 'python -m app.cli reindex-all'."
+            )
+    for vector in vectors:
+        if not all(math.isfinite(v) for v in vector) or not any(vector):
+            raise EmbeddingError(
+                f"The {label} embedding service returned an unusable (zero or non-numeric) vector."
+            )
+    return [normalize(v) for v in vectors]
+
+
 class HttpEmbedder(ABC):
     """Batching, retry with exponential backoff, error mapping and normalisation. Subclasses only
     describe their request and response format."""
@@ -90,7 +117,11 @@ class HttpEmbedder(ABC):
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         rng: Callable[[], float] = random.random,
         max_retries: int = MAX_RETRIES,
+        document_prefix: str = "",
+        query_prefix: str = "",
     ) -> None:
+        self.document_prefix = document_prefix
+        self.query_prefix = query_prefix
         self.model = model
         self.dim = dim
         self._api_key = api_key
@@ -126,12 +157,16 @@ class HttpEmbedder(ABC):
     async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
         vectors: list[list[float]] = []
         for start in range(0, len(texts), self._batch_size):
-            batch = [t if t.strip() else " " for t in texts[start : start + self._batch_size]]
+            batch = [
+                self.document_prefix + (t if t.strip() else " ")
+                for t in texts[start : start + self._batch_size]
+            ]
             vectors.extend(await self._embed_batch(batch, "document"))
         return vectors
 
     async def embed_query(self, text: str) -> list[float]:
-        return (await self._embed_batch([text if text.strip() else " "], "query"))[0]
+        prefixed = self.query_prefix + (text if text.strip() else " ")
+        return (await self._embed_batch([prefixed], "query"))[0]
 
     def _delay(self, attempt: int, retry_after: float | None) -> float:
         if retry_after is not None:
@@ -178,25 +213,7 @@ class HttpEmbedder(ABC):
             raise EmbeddingError(
                 f"The {self.label} embedding service returned an unexpected answer."
             ) from exc
-        if len(vectors) != count:
-            raise EmbeddingError(
-                f"The {self.label} embedding service returned {len(vectors)} vectors "
-                f"for {count} texts."
-            )
-        for vector in vectors:
-            if len(vector) != self.dim:
-                raise EmbeddingError(
-                    f"The {self.label} embedding service returned vectors of size {len(vector)}, "
-                    f"but EMBEDDING_DIM is {self.dim}. Check EMBEDDING_MODEL and EMBEDDING_DIM, "
-                    "then run 'python -m app.cli reindex-all'."
-                )
-        for vector in vectors:
-            if not all(math.isfinite(v) for v in vector) or not any(vector):
-                raise EmbeddingError(
-                    f"The {self.label} embedding service returned an unusable (zero or "
-                    "non-numeric) vector."
-                )
-        return [normalize(v) for v in vectors]
+        return validate_vectors(vectors, count=count, dim=self.dim, label=self.label)
 
     def _permanent_error(self, response: httpx.Response) -> EmbeddingError:
         status = response.status_code
@@ -287,6 +304,163 @@ class OpenAIEmbedder(HttpEmbedder):
         return [[float(v) for v in item["embedding"]] for item in items]
 
 
+class LocalServerEmbedder(HttpEmbedder):
+    """Base for embedding servers the owner runs: no key needed, a short retry budget (a server
+    that is down should fail fast, not for minutes) and the address in every message."""
+
+    def __init__(self, *, base_url: str, **kwargs: Any) -> None:
+        kwargs.setdefault("max_retries", 2)
+        super().__init__(**kwargs)
+        self.base_url = base_url.rstrip("/")
+        self.label = f"{self.label} ({self.base_url})"
+
+
+class OllamaEmbedder(LocalServerEmbedder):
+    provider = "ollama"
+    label = "Ollama"
+
+    def _request(self, texts: list[str], kind: str) -> tuple[str, dict[str, str], dict[str, Any]]:
+        return f"{self.base_url}/api/embed", {}, {"model": self.model, "input": texts}
+
+    def _parse(self, payload: Any, count: int) -> list[list[float]]:
+        return [[float(v) for v in vector] for vector in payload["embeddings"]]
+
+    def _permanent_error(self, response: httpx.Response) -> EmbeddingError:
+        if response.status_code == 404:
+            return EmbeddingError(
+                f"The {self.label} embedding service does not have the model '{self.model}' "
+                f"(or the address is wrong). Run 'ollama pull {self.model}' on that server, "
+                "or check OLLAMA_BASE_URL and EMBEDDING_MODEL."
+            )
+        return super()._permanent_error(response)
+
+
+class OpenAICompatibleEmbedder(LocalServerEmbedder):
+    provider = "openai_compatible"
+    label = "OpenAI-compatible"
+
+    def _request(self, texts: list[str], kind: str) -> tuple[str, dict[str, str], dict[str, Any]]:
+        headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+        return f"{self.base_url}/embeddings", headers, {"input": texts, "model": self.model}
+
+    def _parse(self, payload: Any, count: int) -> list[list[float]]:
+        items = sorted(payload["data"], key=lambda item: item["index"])
+        return [[float(v) for v in item["embedding"]] for item in items]
+
+    def _permanent_error(self, response: httpx.Response) -> EmbeddingError:
+        if response.status_code == 404:
+            return EmbeddingError(
+                f"The {self.label} embedding service answered 404: the address or the model "
+                f"'{self.model}' is not available. Check LOCAL_EMBEDDING_BASE_URL (or "
+                "LOCAL_LLM_BASE_URL, it must end in /v1) and EMBEDDING_MODEL."
+            )
+        return super()._permanent_error(response)
+
+
+INSTALL_HINT = (
+    "In-process embeddings need the optional PyTorch extra. Install it with "
+    "'cd backend && python -m uv sync --extra local-embeddings' (about 1-2 GB), "
+    "then restart CoursePilot."
+)
+_MODELS: dict[tuple[str, str, str], Any] = {}  # loaded once per process
+
+
+def _pick_device(requested: str) -> str:
+    if requested != "auto":
+        return requested
+    try:
+        import torch
+    except ImportError:  # sentence-transformers cannot load without torch anyway
+        return "cpu"
+    if torch.cuda.is_available():
+        return "cuda"
+    mps = getattr(torch.backends, "mps", None)
+    if mps is not None and mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+class LocalSentenceTransformerEmbedder:
+    """``EMBEDDING_PROVIDER=local``: sentence-transformers inside this process (optional extra).
+
+    The package is imported on first use only. Loading and encoding are heavy and blocking, so
+    both run in a worker thread (``asyncio.to_thread``), never on the event loop. The model is
+    loaded once per process and cached on disk under ``DATA_DIR/models``."""
+
+    provider = "local"
+
+    def __init__(
+        self,
+        *,
+        model: str,
+        dim: int,
+        device: str = "auto",
+        cache_dir: Path | None = None,
+        batch_size: int = 64,
+        document_prefix: str = "",
+        query_prefix: str = "",
+    ) -> None:
+        self.model = model
+        self.dim = dim
+        self._device = device
+        self._cache_dir = cache_dir
+        self._batch_size = max(1, batch_size)
+        self.document_prefix = document_prefix
+        self.query_prefix = query_prefix
+
+    def _load(self) -> Any:
+        try:
+            import sentence_transformers
+        except ImportError as exc:
+            raise EmbeddingNotConfiguredError(INSTALL_HINT) from exc
+        device = _pick_device(self._device)
+        key = (self.model, device, str(self._cache_dir))
+        loaded = _MODELS.get(key)
+        if loaded is None:
+            try:
+                loaded = sentence_transformers.SentenceTransformer(
+                    self.model,
+                    device=device,
+                    cache_folder=None if self._cache_dir is None else str(self._cache_dir),
+                    trust_remote_code=False,
+                )
+            except Exception as exc:  # download, offline or a wrong model name: say which model
+                detail = " ".join(str(exc).split())[:MAX_ERROR_DETAIL]
+                raise EmbeddingError(
+                    f"Could not load the local embedding model '{self.model}': {detail}. "
+                    "The first start downloads the model, so the server needs internet access "
+                    "once."
+                ) from exc
+            _MODELS[key] = loaded
+        return loaded
+
+    def _encode(self, texts: list[str]) -> list[list[float]]:
+        model = self._load()
+        raw = model.encode(
+            texts,
+            normalize_embeddings=True,
+            batch_size=self._batch_size,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        )
+        return [[float(v) for v in row] for row in raw.tolist()]
+
+    async def _run(self, texts: list[str]) -> list[list[float]]:
+        vectors = await asyncio.to_thread(self._encode, texts)
+        return validate_vectors(vectors, count=len(texts), dim=self.dim, label="local")
+
+    async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        return await self._run([self.document_prefix + (t if t.strip() else " ") for t in texts])
+
+    async def embed_query(self, text: str) -> list[float]:
+        return (await self._run([self.query_prefix + (text if text.strip() else " ")]))[0]
+
+    async def aclose(self) -> None:
+        return None
+
+
 _WORD = re.compile(r"\w+")
 
 
@@ -334,6 +508,8 @@ def get_embedder(settings: Settings) -> Embedder:
     provider = settings.embedding_provider
     if provider == "fake":
         return FakeEmbedder(model=settings.embedding_model, dim=settings.embedding_dim)
+    if provider in ("ollama", "openai_compatible", "local"):
+        return _get_local_embedder(settings)
     keys = {
         "gemini": (settings.google_api_key, "GOOGLE_API_KEY", "Gemini", GeminiEmbedder),
         "voyage": (settings.voyage_api_key, "VOYAGE_API_KEY", "Voyage", VoyageEmbedder),
@@ -348,4 +524,44 @@ def get_embedder(settings: Settings) -> Embedder:
         dim=settings.embedding_dim,
         api_key=key,
         batch_size=settings.embedding_batch_size,
+    )
+
+
+def _get_local_embedder(settings: Settings) -> Embedder:
+    """The local-AI embedders: no API key; the server address (or the extra) must be there."""
+    prefixes = resolve_prefixes(settings)
+    provider = settings.embedding_provider
+    if provider == "local":
+        return LocalSentenceTransformerEmbedder(
+            model=settings.embedding_model,
+            dim=settings.embedding_dim,
+            device=settings.local_embedding_device,
+            cache_dir=Path(settings.data_dir) / "models",
+            batch_size=settings.embedding_batch_size,
+            document_prefix=prefixes.document,
+            query_prefix=prefixes.query,
+        )
+    secret = settings.local_llm_api_key
+    key = secret.get_secret_value().strip() if secret else ""
+    base = settings.ollama_base_url
+    cls: type[LocalServerEmbedder] = OllamaEmbedder
+    if provider == "openai_compatible":
+        cls = OpenAICompatibleEmbedder
+        base = settings.local_embedding_base_url or settings.local_llm_base_url
+        if not base:
+            raise EmbeddingNotConfiguredError(
+                "The OpenAI-compatible embedding provider needs LOCAL_EMBEDDING_BASE_URL (or "
+                "LOCAL_LLM_BASE_URL) in .env. Ask an administrator to set it and restart "
+                "CoursePilot, then re-index this document."
+            )
+    else:
+        key = ""
+    return cls(
+        base_url=base,
+        model=settings.embedding_model,
+        dim=settings.embedding_dim,
+        api_key=key,
+        batch_size=settings.embedding_batch_size,
+        document_prefix=prefixes.document,
+        query_prefix=prefixes.query,
     )

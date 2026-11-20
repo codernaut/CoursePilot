@@ -8,7 +8,7 @@ No Docker, no Node, no externally installed servers: SQLite (with sqlite-vec and
 
 ## Quick start
 
-Requirements: Python 3.12.
+Requirements: Python 3.12 (setup can provide it: it asks before installing uv and a private Python 3.12).
 
 ```bash
 # Windows
@@ -20,7 +20,7 @@ start.bat
 ./start.sh
 ```
 
-`setup` installs [uv](https://docs.astral.sh/uv/) if needed, installs dependencies, asks for the first admin account, your AI provider (Anthropic Claude or Google Gemini), an embedding provider and optional Tavily key for the web fallback (any key may be skipped; without a Tavily key the assistant answers from the material only and says that web search is not configured; faculty and admins can switch web search off per module on the Programme structure page), writes `.env`, and prepares the database. `start` runs migrations, starts the web app and the worker, and opens your browser at http://localhost:8000. There is no self-registration: the admin creates faculty and student accounts.
+`setup` installs [uv](https://docs.astral.sh/uv/) if needed, installs dependencies, asks for the first admin account, your AI provider (Anthropic Claude or Google Gemini; Ollama or another local server for testing), an embedding provider and optional Tavily key for the web fallback (any key may be skipped; without a Tavily key the assistant answers from the material only and says that web search is not configured; faculty and admins can switch web search off per module on the Programme structure page), writes `.env`, and prepares the database. `start` runs migrations, starts the web app and the worker, and opens your browser at http://localhost:8000. There is no self-registration: the admin creates faculty and student accounts.
 
 ### Letting other computers connect (no HTTPS)
 

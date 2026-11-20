@@ -10,6 +10,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from app.core.config import (
     INSECURE_SECRET_KEYS,
@@ -157,6 +158,23 @@ def _url_checks(settings: Settings) -> list[CheckResult]:
     return results
 
 
+def _local_url_checks(name: str, url: str) -> list[CheckResult]:
+    """A local-AI address: must be set; plain http to another machine is worth a warning."""
+    if not url:
+        return [CheckResult(FAIL, name, "is empty; set the server address in .env")]
+    host = urlsplit(url).hostname or ""
+    if url.startswith("http://") and host not in _LOOPBACK_HOSTS and host != "ollama":
+        return [
+            CheckResult(
+                WARN,
+                name,
+                f"{url} is plain http to another machine; prompts and material excerpts cross "
+                "the network unencrypted. Use https or a trusted network",
+            )
+        ]
+    return [CheckResult(OK, name, f"{url}")]
+
+
 def _provider_checks(settings: Settings) -> list[CheckResult]:
     def has(secret: object) -> bool:
         return secret is not None
@@ -166,6 +184,10 @@ def _provider_checks(settings: Settings) -> list[CheckResult]:
     llm_names = {"anthropic": "ANTHROPIC_API_KEY", "gemini": "GOOGLE_API_KEY"}
     if settings.llm_provider == "fake":
         results.append(CheckResult(FAIL, "LLM_PROVIDER", "is 'fake' (tests only)"))
+    elif settings.llm_provider == "ollama":
+        results.extend(_local_url_checks("OLLAMA_BASE_URL (chat)", settings.ollama_base_url))
+    elif settings.llm_provider == "openai_compatible":
+        results.extend(_local_url_checks("LOCAL_LLM_BASE_URL", settings.local_llm_base_url))
     elif has(llm_keys[settings.llm_provider]):
         results.append(CheckResult(OK, "LLM key", f"{llm_names[settings.llm_provider]} is set"))
     else:
@@ -176,6 +198,17 @@ def _provider_checks(settings: Settings) -> list[CheckResult]:
                 f"{llm_names[settings.llm_provider]} is missing; chat will not work",
             )
         )
+    if settings.llm_provider in ("ollama", "openai_compatible") and (
+        settings.llm_model.lower().startswith(("claude", "gemini"))
+        or settings.llm_fast_model.lower().startswith(("claude", "gemini"))
+    ):
+        results.append(
+            CheckResult(
+                FAIL,
+                "LLM_MODEL",
+                f"{settings.llm_model} / {settings.llm_fast_model} are not local model names",
+            )
+        )
     emb_keys = {
         "gemini": ("GOOGLE_API_KEY", settings.google_api_key),
         "voyage": ("VOYAGE_API_KEY", settings.voyage_api_key),
@@ -183,6 +216,29 @@ def _provider_checks(settings: Settings) -> list[CheckResult]:
     }
     if settings.embedding_provider == "fake":
         results.append(CheckResult(FAIL, "EMBEDDING_PROVIDER", "is 'fake' (tests only)"))
+    elif settings.embedding_provider == "ollama":
+        results.extend(_local_url_checks("OLLAMA_BASE_URL (embeddings)", settings.ollama_base_url))
+    elif settings.embedding_provider == "openai_compatible":
+        results.extend(
+            _local_url_checks(
+                "LOCAL_EMBEDDING_BASE_URL",
+                settings.local_embedding_base_url or settings.local_llm_base_url,
+            )
+        )
+    elif settings.embedding_provider == "local":
+        try:
+            import sentence_transformers  # noqa: F401
+        except ImportError:
+            results.append(
+                CheckResult(
+                    FAIL,
+                    "Embeddings (local)",
+                    "sentence-transformers is not installed; run "
+                    "'python -m uv sync --extra local-embeddings' in backend/",
+                )
+            )
+        else:
+            results.append(CheckResult(OK, "Embeddings (local)", "sentence-transformers found"))
     else:
         name, secret = emb_keys[settings.embedding_provider]
         if has(secret):

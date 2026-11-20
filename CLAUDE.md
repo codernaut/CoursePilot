@@ -39,7 +39,7 @@ CoursePilot is a web-hosted **RAG (retrieval-augmented generation) study assista
 Three supported ways to run CoursePilot, documented with sizing in the user manual ("Deployment options and system requirements") and `docs/deploy.md`:
 
 1. **On-premises, cloud AI** (available): app + worker on the institution's machine; Anthropic/Gemini chat, Gemini/Voyage/OpenAI embeddings, Tavily.
-2. **On-premises, local AI** (planned, M11 in §14; NOT in the code yet, only `anthropic` and `gemini` exist): nothing leaves the network when `WEB_SEARCH_PROVIDER=none`; sized by GPU VRAM.
+2. **On-premises, local AI** (available, M11; for testing, Anthropic/Gemini stay the recommended default): chat through `ollama` or `openai_compatible` (vLLM, LM Studio, llama.cpp server...), embeddings through `ollama`, `openai_compatible` or in-process `local` (sentence-transformers, optional extra); nothing leaves the network when `WEB_SEARCH_PROVIDER=none`; sized by GPU VRAM. Optional compose profile `local-ai` starts an Ollama container.
 3. **Everything in the cloud** (available as a service on a VPS with systemd + Caddy, `deploy/`; **optional Docker image, M10:** `compose.yaml` for one host, `deploy/kubernetes/` for a cluster; the web app and the worker run from one image). Always a single instance: SQLite on the server's local disk or block volume, never a network file system, no horizontal scaling.
 
 ---
@@ -60,6 +60,7 @@ Follow the build order in §14. Update this section as milestones land: one line
 - **M8 done (2026-11-07):** S3Storage, backup/restore, `check --production`, `serve`, `deploy/`, `docs/deploy.md`.
 - **M9 done (2026-11-17):** temporary module access codes: faculty/admins create and revoke per-module codes (2-24 h), guests join without an account and may chat, search and read passages of that one module only.
 - **M10 done (2026-11-17):** optional Docker image, compose (web + worker), Kubernetes manifests (one replica), CI image check.
+- **M11 done (2026-11-20):** local AI: ollama and openai_compatible chat, ollama/openai_compatible/local (sentence-transformers) embeddings, compose local-ai profile.
 - **UI redesign done (2026-11-08, top-bar fix 2026-11-09):** "Warm Studio" design with light/dark themes and accents (rules in §11).
 
 Detailed decisions and exact behaviour per milestone: docs/decisions/history.md (read it before changing an area).
@@ -80,7 +81,7 @@ Choose these unless a decision in this file is explicitly changed. Nothing here 
 | Web | **FastAPI** + Uvicorn, async throughout | One process serves pages, static files and the JSON API |
 | Web UI | **Jinja2 + HTMX + small vanilla JS + handwritten CSS** | No Node, no CDN; `htmx.min.js` vendored in `app/web/static`; same origin, no CORS |
 | Agent | **LangGraph** v1 explicit `StateGraph`, LangChain v1 | Never the deprecated `langgraph.prebuilt.create_react_agent` |
-| LLM access | LangChain `init_chat_model` behind `llm/factory.py` | `anthropic`, `gemini`; `fake` for tests only. Ollama later as a new module |
+| LLM access | LangChain `init_chat_model` behind `llm/factory.py` | `anthropic`, `gemini` (default options), then `ollama` (`langchain-ollama`) and `openai_compatible` (`langchain-openai` with `base_url`) for local AI; `fake` for tests only |
 | Database | **SQLite >= 3.35** under `DATA_DIR` (local disk, never a network share), WAL | SQLAlchemy 2.x async + `aiosqlite`. Every connection loads sqlite-vec and sets `journal_mode=WAL`, `busy_timeout`, `foreign_keys=ON`, `synchronous=NORMAL`. Write transactions use `BEGIN IMMEDIATE`. `setup` and `/health/ready` check SQLite version, `enable_load_extension` and FTS5 |
 | Vector / keyword search | **sqlite-vec** `vec0` table `chunk_vectors`; **FTS5** table `chunks_fts` | `float[EMBEDDING_DIM] distance_metric=cosine` keyed by `chunks.seq`; dimension fixed at creation (§7.4); vectors via `sqlite_vec.serialize_float32` |
 | Migrations | **Alembic**, `render_as_batch=True` | No schema change without a migration. `env.py` excludes `chunk_vectors*` / `chunks_fts*` from autogenerate; those are created by hand-written code |
@@ -88,7 +89,7 @@ Choose these unless a decision in this file is explicitly changed. Nothing here 
 | File storage | `Storage` interface: **LocalStorage** (default, `DATA_DIR/files`, random keys) and **S3Storage** (`boto3`, R2 compatible, `STORAGE_BACKEND=s3`) | |
 | Jobs | `jobs` table, separate worker (`python -m app.worker`) | Atomic claim with one `UPDATE … RETURNING`; behind an interface |
 | Parsing | `pymupdf` (pinned `<2`), `python-pptx`, `python-docx`, `markdown-it-py`, `beautifulsoup4` | OCR (`pytesseract`) optional behind `OCR_ENABLED`, off by default |
-| Embeddings | `gemini` (default `gemini-embedding-001`, 768 dims), `voyage`, `openai`; `fake` for tests | Plain `httpx`, no vendor SDKs (§7.4) |
+| Embeddings | `gemini` (default `gemini-embedding-001`, 768 dims), `voyage`, `openai`; local AI: `ollama`, `openai_compatible`, `local` (in-process `sentence-transformers`, optional extra `local-embeddings` with the CPU-only PyTorch build, so a plain `uv sync` never installs PyTorch and `uv.lock` holds no proprietary `nvidia-*` packages); `fake` for tests | Plain `httpx`, no vendor SDKs (§7.4) |
 | Web search | **Tavily** behind `WebSearchProvider` | `WEB_SEARCH_PROVIDER` = `tavily` or `none`; fake in tests |
 | Auth | Server-side sessions, argon2 via `pwdlib`, behind an interface | HttpOnly cookie + CSRF token (§13); no self-registration; roles `admin`, `faculty`, `student` |
 | Testing / quality / CI | `pytest`, `pytest-asyncio`, `httpx`, temp SQLite files; `ruff`; `mypy --strict` on `app` and `tests` | No containers; fakes for LLM, embeddings, web search, storage |
@@ -101,7 +102,7 @@ Top level: `CLAUDE.md`, `README.md`, `LICENSE`, `.env.example` (every env var; t
 
 `backend/`: `pyproject.toml`, `uv.lock`, `alembic.ini`, `migrations/`, `app/`, `tests/` (`unit/`, `integration/`, `fixtures/`, `evals/`).
 
-`backend/app/`: `main.py` (app factory), `cli.py`, `worker.py`, `core/` (config, logging, errors, middleware, version, zip_guard), `resources/`, `db/` (engine, session, `chunk_store`), `models/`, `schemas/`, `api/` (JSON routers under `/api/v1`), `web/` (`routes/`, `templates/`, `static/`), `services/` (business logic), `storage/` (`local.py`, `s3.py`), `ingestion/` (`parsers/`, `chunker.py`, `tokens.py`, `embedder.py`, `index_meta.py`, `handlers.py`, `pipeline.py`), `retrieval/` (`hybrid.py`, `query_embedding.py`, `rerank.py`, `access.py`), `websearch/`, `llm/`, `agent/` (`graph.py`, `state.py`, `runtime.py`, `prompts.py`, `tools.py`, `citations.py`), `jobs/`. The full annotated tree: docs/decisions/history.md ("Moved detail from CLAUDE.md §4").
+`backend/app/`: `main.py` (app factory), `cli.py`, `worker.py`, `core/` (config, logging, errors, middleware, version, zip_guard), `resources/`, `db/` (engine, session, `chunk_store`), `models/`, `schemas/`, `api/` (JSON routers under `/api/v1`), `web/` (`routes/`, `templates/`, `static/`), `services/` (business logic), `storage/` (`local.py`, `s3.py`), `ingestion/` (`parsers/`, `chunker.py`, `tokens.py`, `embedder.py`, `prefixes.py`, `index_meta.py`, `handlers.py`, `pipeline.py`), `retrieval/` (`hybrid.py`, `query_embedding.py`, `rerank.py`, `access.py`), `websearch/`, `llm/`, `agent/` (`graph.py`, `state.py`, `runtime.py`, `prompts.py`, `tools.py`, `citations.py`), `jobs/`. The full annotated tree: docs/decisions/history.md ("Moved detail from CLAUDE.md §4").
 
 The backend layering is strict: `api` and `web/routes` → `services` → (`ingestion`, `retrieval`, `agent`, `storage`, `jobs`) → `db/models`. Routers and page routes contain no business logic and share the same services. Services never import from `api` or `web`.
 
@@ -161,6 +162,7 @@ SSE event types (keep this contract stable; the page JS depends on it): `status`
 - Every chunk stores `embedding_model`. A query **must** be embedded with the same model as the chunks it searches.
 - Changing `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL` or `EMBEDDING_DIM` requires `python -m app.cli reindex-all` (drops and recreates `chunk_vectors`, re-embeds everything, updates `app_meta`). The app refuses to search (`index_mismatch`) if the configured values do not match `app_meta`. Record the change in an ADR.
 - Anthropic has no embeddings API: Claude users pick `gemini`, `voyage` (`voyage-3.5`) or `openai` (`text-embedding-3-small`). The embedding provider is independent of the chat provider.
+- Local embeddings (M11): `ollama` (`POST {OLLAMA_BASE_URL}/api/embed`), `openai_compatible` (`POST {LOCAL_EMBEDDING_BASE_URL or LOCAL_LLM_BASE_URL}/embeddings`) and `local` (sentence-transformers in the process, loaded once, always in a thread; needs `uv sync --extra local-embeddings`). Every provider checks the returned vector length against `EMBEDDING_DIM`. Models that need task prefixes get them from the built-in table in `ingestion/prefixes.py` (nomic-embed-text, e5, bge-*-en, mxbai-embed-large), overridable with `EMBEDDING_DOCUMENT_PREFIX` / `EMBEDDING_QUERY_PREFIX`. The effective prefixes are NOT recorded in `app_meta`: changing them (or the model) needs `reindex-all` like any embedding change.
 - Embed in batches (64–128 texts) with backoff on rate limits. Keys: `GOOGLE_API_KEY` (shared by Gemini chat and embeddings), `VOYAGE_API_KEY`, `OPENAI_API_KEY`. Without an embedding key, uploads are accepted but processing fails with a readable error; re-index once the key is set.
 
 ---
@@ -184,7 +186,7 @@ SSE event types (keep this contract stable; the page JS depends on it): `status`
 - **Citations** (`agent/citations.py`): build a registry `{"C1": RetrievedChunk, "W1": WebResult, …}` before generation and pass numbered sources to the LLM. After generation parse the markers, drop or flag any not in the registry, and return only the sources actually cited.
 - **Web search**: only when all material tiers are insufficient, only if `modules.web_search_enabled` is true for the module (for "All material" chats the global provider setting decides), at most `WEB_MAX_QUERIES` (default 2) per turn; restrict to `WEB_ALLOWED_DOMAINS` when set; keep only `http(s)` URLs; record URL, title, snippet and retrieval time; never send the user's identity or document content to the provider, only the query.
 - **Memory**: `thread_id = conversation.id` with the SQLite checkpointer; trim or summarise history to fit the context window.
-- **Models**: `LLM_PROVIDER`, `LLM_MODEL`, and a cheaper `LLM_FAST_MODEL` for rewriting and sufficiency checks. Defaults: `anthropic` → `claude-sonnet-5-5` / `claude-haiku-5-5`; `gemini` → `gemini-2.5-flash` for both. Names are configurable; check them against the provider's current catalogue. No sampling parameters are sent to Anthropic (current Claude models reject a non-default `temperature` with a 400); `LLM_EFFORT` (default `low`) sets Anthropic's effort, because adaptive thinking counts toward the output caps. Output is capped by `LLM_MAX_OUTPUT_TOKENS` (answer) and `LLM_FAST_MAX_OUTPUT_TOKENS`; an answer cut by the limit gets a short note. The answer prompt is ordered for caching: system message, history, then one human message with sources and the question; with `LLM_PROMPT_CACHE` (Anthropic only) the system block and the last history message carry `cache_control: ephemeral`, and cache token counts go to `messages.token_usage`.
+- **Models**: `LLM_PROVIDER`, `LLM_MODEL`, and a cheaper `LLM_FAST_MODEL` for rewriting and sufficiency checks. Defaults: `anthropic` → `claude-sonnet-5-5` / `claude-haiku-5-5`; `gemini` → `gemini-2.5-flash` for both. Names are configurable; check them against the provider's current catalogue. No sampling parameters are sent to Anthropic (current Claude models reject a non-default `temperature` with a 400); `LLM_EFFORT` (default `low`) sets Anthropic's effort, because adaptive thinking counts toward the output caps. Output is capped by `LLM_MAX_OUTPUT_TOKENS` (answer) and `LLM_FAST_MAX_OUTPUT_TOKENS`; an answer cut by the limit gets a short note. Local providers (M11): `ollama` (`ChatOllama`, `OLLAMA_BASE_URL`) and `openai_compatible` (`ChatOpenAI`, `LOCAL_LLM_BASE_URL`, optional `LOCAL_LLM_API_KEY`) get temperature but none of the Anthropic-only options (effort, prompt caching); setup prefills `qwen2.5:7b-instruct` for Ollama; `ProviderNotConfigured` when the address or a local model name is missing. Local models can be slow: raise `AGENT_TIMEOUT_S` on CPU-only servers. The answer prompt is ordered for caching: system message, history, then one human message with sources and the question; with `LLM_PROMPT_CACHE` (Anthropic only) the system block and the last history message carry `cache_control: ephemeral`, and cache token counts go to `messages.token_usage`.
 - **Provider interface**: `llm/factory.py` returns a chat model and raises a typed `ProviderNotConfigured` when the key is missing. A local provider means adding one module, not changing callers. `fake` is for tests only.
 - Stream tokens. Time out the whole turn after `AGENT_TIMEOUT_S` (default 60).
 
@@ -271,11 +273,11 @@ Everything runs locally without Docker: `pytest` with temporary SQLite files and
 
 ## 14. Build order (milestones)
 
-M0 to M10 and the UI redesign are done (§2). Any further work follows the same rules: one well-bounded milestone at a time, finished and committed in a working state with tests, and recorded in docs/decisions/history.md with one line added to §2. The original milestone scopes: docs/decisions/history.md ("Moved detail from CLAUDE.md §14").
+M0 to M11 and the UI redesign are done (§2). Any further work follows the same rules: one well-bounded milestone at a time, finished and committed in a working state with tests, and recorded in docs/decisions/history.md with one line added to §2. The original milestone scopes: docs/decisions/history.md ("Moved detail from CLAUDE.md §14").
 
 M10 (optional Docker image, compose, Kubernetes) is done: see docs/decisions/history.md ("M10") and ADR 0002.
 
-**Next: M11, local AI models (deployment profile 2; needs code changes; start only when the owner says so).** A third chat provider next to `anthropic` and `gemini` (e.g. `LLM_PROVIDER=ollama` with `OLLAMA_BASE_URL`, a new module behind `llm/factory.py`, offered by setup) and a local embedding provider behind the embedder interface (changing to it needs `reindex-all`, §7.4). Not in the code today: `Settings` rejects any other provider.
+M11 (local AI providers, compose profile `local-ai`) is done: see docs/decisions/history.md ("M11") and ADR 0003.
 
 ---
 
@@ -283,7 +285,6 @@ M10 (optional Docker image, compose, Kubernetes) is done: see docs/decisions/his
 
 - University SSO / Google OAuth (the auth interface is designed for it); LMS (LTI 1.3) integration.
 - Per-module or per-document permissions (hook point: `retrieval/access.py`).
-- Local models through Ollama (new module behind `llm/factory.py` and the embedder interface); `local` sentence-transformers embeddings. Scheduled as M11 (§14); it unlocks deployment profile 2 (on-premises, local AI; §1).
 - Lecture video/audio transcription (Whisper) with timestamp citations.
 - Practice-question and flashcard generation from material; study plans.
 - Per-module instructor controls for "hint mode" vs "full answer mode".
@@ -298,8 +299,9 @@ M10 (optional Docker image, compose, Kubernetes) is done: see docs/decisions/his
 If `uv` is not on PATH, `python -m uv` works everywhere `uv` is written below.
 
 ```bash
-# first-time setup (checks Python 3.12, installs uv if missing, uv sync, asks for admin + keys,
-# writes .env, runs migrations, seed-structure, create-admin)
+# first-time setup (finds uv, or asks before installing it; asks before downloading a private
+# Python 3.12 if none exists; uv sync, asks for admin + keys, writes .env, runs migrations,
+# seed-structure, create-admin)
 setup.bat            # Windows
 ./setup.sh           # macOS / Linux
 
@@ -341,7 +343,7 @@ uv run pytest --junitxml=reports/junit.xml --cov=app --cov-report=html:reports/h
 python scripts/build_release.py --tag v0.1.0
 ```
 
-How `setup.*` installs uv (PEP 668 handling): docs/decisions/history.md ("Moved detail from CLAUDE.md §16").
+How `setup.*` finds and installs uv and Python: it looks for `uv` on PATH, in `~/.local/bin` / `~/.cargo/bin`, then `python -m uv`; if none, `pip install --user uv`, else it asks before running the official astral.sh installer. When `uv python find --no-project ">=3.12,<3.13"` finds nothing (the range of `requires-python`) it asks before `uv python install 3.12` (a private Python, system Pythons untouched); then `uv sync --inexact` and `app.cli setup`. `start.*` use the same discovery. Nothing is downloaded without a yes (history.md, "Setup installs uv and Python"; PEP 668 handling: "Moved detail from CLAUDE.md §16").
 
 Rebuild the user manual (needs pandoc; the PDF also needs Edge, Chrome or Chromium; outputs are git-ignored) and start the screenshot demo (fake LLM, port 8767, data in `.manual-demo/`, never for real data):
 
@@ -391,7 +393,7 @@ PROGRAM_YEARS=3
 BLOCKS_PER_YEAR=3
 MODULES_PER_BLOCK=3
 
-LLM_PROVIDER=anthropic              # anthropic | gemini  (fake is for tests only)
+LLM_PROVIDER=anthropic              # anthropic | gemini | ollama | openai_compatible  (fake is for tests only)
 LLM_MODEL=claude-sonnet-5-5         # gemini default: gemini-2.5-flash
 LLM_FAST_MODEL=claude-haiku-5-5     # gemini default: gemini-2.5-flash
 LLM_MAX_OUTPUT_TOKENS=1024          # cap on the length of an answer (64-16000)
@@ -401,9 +403,17 @@ LLM_EFFORT=low                      # Anthropic effort: low | medium | high | xh
 ANTHROPIC_API_KEY=
 GOOGLE_API_KEY=                     # Gemini chat and Gemini embeddings
 
-EMBEDDING_PROVIDER=gemini           # gemini | voyage | openai  (fake is for tests only)
+OLLAMA_BASE_URL=http://localhost:11434   # Ollama server (chat and embeddings); http://ollama:11434 with the compose profile local-ai
+LOCAL_LLM_BASE_URL=                 # OpenAI-compatible server incl. /v1 (vLLM, LM Studio, llama.cpp...); empty = unused
+LOCAL_LLM_API_KEY=                  # optional; many local servers ignore it
+LOCAL_EMBEDDING_BASE_URL=           # OpenAI-compatible embeddings server; empty = LOCAL_LLM_BASE_URL
+LOCAL_EMBEDDING_DEVICE=auto         # auto | cpu | cuda | mps (EMBEDDING_PROVIDER=local only)
+
+EMBEDDING_PROVIDER=gemini           # gemini | voyage | openai | ollama | openai_compatible | local  (fake is for tests only)
 EMBEDDING_MODEL=gemini-embedding-001
 EMBEDDING_DIM=768
+EMBEDDING_QUERY_PREFIX=              # empty = the built-in default for the model (ingestion/prefixes.py)
+EMBEDDING_DOCUMENT_PREFIX=          # same; changing a prefix needs reindex-all
 VOYAGE_API_KEY=
 OPENAI_API_KEY=
 

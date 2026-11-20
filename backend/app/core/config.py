@@ -57,7 +57,9 @@ class Settings(BaseSettings):
     modules_per_block: int = Field(3, ge=1)
 
     # LLM ("fake" is for tests only)
-    llm_provider: Literal["anthropic", "gemini", "fake"] = "anthropic"
+    llm_provider: Literal["anthropic", "gemini", "ollama", "openai_compatible", "fake"] = (
+        "anthropic"
+    )
     llm_model: str = "claude-sonnet-5-5"
     llm_fast_model: str = "claude-haiku-5-5"
     llm_max_output_tokens: int = Field(1024, ge=64, le=16000)  # the answer
@@ -68,10 +70,23 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = None
     google_api_key: SecretStr | None = None
 
+    # Local AI (optional): Ollama and any OpenAI-compatible server (vLLM, LM Studio, llama.cpp...)
+    ollama_base_url: str = "http://localhost:11434"
+    local_llm_base_url: str = ""
+    local_llm_api_key: SecretStr | None = None
+    local_embedding_base_url: str = ""  # empty = use local_llm_base_url
+    local_embedding_device: Literal["auto", "cpu", "cuda", "mps"] = "auto"
+
     # Embeddings ("fake" is for tests only)
-    embedding_provider: Literal["gemini", "voyage", "openai", "fake"] = "gemini"
+    embedding_provider: Literal[
+        "gemini", "voyage", "openai", "ollama", "openai_compatible", "local", "fake"
+    ] = "gemini"
     embedding_model: str = "gemini-embedding-001"
     embedding_dim: int = Field(768, ge=1)
+    # Text put before documents / queries before embedding; empty = the built-in default for the
+    # model (ingestion/prefixes.py).
+    embedding_query_prefix: str = ""
+    embedding_document_prefix: str = ""
     voyage_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None
 
@@ -129,6 +144,7 @@ class Settings(BaseSettings):
         "google_api_key",
         "voyage_api_key",
         "openai_api_key",
+        "local_llm_api_key",
         "tavily_api_key",
         "langsmith_api_key",
         mode="before",
@@ -136,6 +152,14 @@ class Settings(BaseSettings):
     @classmethod
     def _empty_to_none(cls, value: object) -> object:
         return None if value == "" else value
+
+    @field_validator("ollama_base_url", "local_llm_base_url", "local_embedding_base_url")
+    @classmethod
+    def _http_url(cls, value: str) -> str:
+        value = value.strip()
+        if value and not value.startswith(("http://", "https://")):
+            raise ValueError("must start with http:// or https://")
+        return value.rstrip("/")
 
     @field_validator("log_level", mode="before")
     @classmethod

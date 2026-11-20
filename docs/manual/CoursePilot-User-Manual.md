@@ -37,7 +37,7 @@ Throughout this manual, a line such as **Who: Students, Faculty** tells you whic
 ## Requirements
 
 - A computer running **Windows, macOS or Linux**.
-- **Python 3.12 or newer** ([python.org](https://www.python.org/downloads/)). On Windows, tick "Add Python to PATH" in the installer.
+- **Python 3.12** is needed, but you do not have to install it beforehand: setup checks for the package manager `uv` and for Python 3.12. If either is missing, it explains what it would do and asks before installing it (see "Running the setup"). If you prefer to install Python yourself, get 3.12 from [python.org](https://www.python.org/downloads/) (on Windows, tick "Add Python to PATH").
 - An **internet connection**, because the AI providers (chat model, embeddings and optionally web search) are cloud services.
 - At least one **API key**: one for the chat model (Anthropic Claude or Google Gemini) and one for embeddings (Gemini, Voyage or OpenAI). A Gemini key can serve both. A Tavily key for web search is optional.
 - No Docker, no Node.js, no database server. Setup installs everything with Python tools.
@@ -60,9 +60,16 @@ setup.bat          (Windows)
 ./setup.sh         (macOS / Linux)
 ```
 
-The script checks that Python is available, installs the package manager `uv` if it is missing (with `pip install --user uv`; on Linux systems where pip is "externally managed" it offers the official installer and asks first), installs the dependencies, and then starts the interactive questions below. Press **Enter** to accept the value shown in `[brackets]`.
+The script looks for the package manager `uv` and for Python 3.12. If both are present (the usual case on a developer machine) it asks nothing extra: it installs the dependencies and then starts the interactive questions below. Press **Enter** to accept the value shown in `[brackets]`.
 
-If Python is older than 3.12, or SQLite on the computer lacks a needed feature, setup stops and explains what is missing.
+Setup never installs anything without a **yes**. There are at most two extra questions, each answered with `y` (Enter means no):
+
+- **"Run it now? [y/N]"** (only when `uv` is missing). If a Python is already installed, setup first tries `pip install --user uv`. Otherwise it shows the command of the official installer from astral.sh and asks before running it; `uv` goes into your user folder (`.local/bin`), not into the system.
+- **"Download Python 3.12 now? [y/N]"** (only when no Python 3.12 is found). `uv` downloads a private Python 3.12 just for CoursePilot; a Python you already have is left untouched.
+
+If you answer no, setup stops and prints how to install `uv` or Python 3.12 yourself; run it again afterwards. `start.bat` / `./start.sh` find the same `uv`, so they also work when Python came only from `uv`.
+
+If SQLite on the computer lacks a needed feature, setup stops and explains what is missing.
 
 ## The setup questions, step by step
 
@@ -73,11 +80,11 @@ Setup asks the questions in this order.
     - **n** (default): only this computer can open the site, at `http://localhost:<port>`.
     - **y**: other computers on your network can connect. Setup prints a warning: without HTTPS, passwords and session cookies cross the network in clear text, so use this **only on a closed network you trust**. It then asks *"Address other computers will type in their browser"*. Enter the machine's network address as `http://HOST:PORT`, for example `http://192.168.1.20:8000`. `localhost` is not accepted here. See "Choosing the network address" below.
 3. **Session secret.** If there is no strong `SECRET_KEY` yet, setup generates one automatically ("Generated a new SECRET_KEY."). An existing strong key is never replaced.
-4. **Chat AI provider** (`anthropic` or `gemini`). Default `anthropic`.
-5. **Chat model** and **Fast model.** Prefilled with the provider's defaults (Anthropic: `claude-sonnet-5-5` and `claude-haiku-5-5`; Gemini: `gemini-2.5-flash` for both). The fast model is a cheaper one used for rewriting follow-up questions and quick checks. Press Enter to accept.
-6. **API key for the chat provider.** The input is hidden. Enter the key, press Enter to keep the current one, type `-` to clear it, or leave it empty to skip. You can skip and add it later, but the chat will say "AI provider not configured" until a key is set.
-7. **Embedding provider** (`gemini`, `voyage` or `openai`). Default `gemini`. Embeddings turn text into numbers so the system can find passages by meaning. Anthropic has no embeddings service, so Claude users pick one of these separately. If you chose Gemini for chat, setup tells you the Gemini key is shared and asks for it only once.
-8. **Embedding model** and **Embedding dimension.** Defaults: Gemini `gemini-embedding-001` / 768, Voyage `voyage-3.5` / 1024, OpenAI `text-embedding-3-small` / 1536.
+4. **Chat AI provider** (`anthropic`, `gemini`, then, for testing, `ollama` or `openai_compatible`). Default `anthropic`; Anthropic and Gemini remain the recommended choice. The two local options run a model on your own hardware: see "Option 2" below. For `ollama` setup asks for the Ollama address (default `http://localhost:11434`); for `openai_compatible` it asks for the server address including `/v1` and an optional key (hidden). It also warns that local models can be slow and suggests raising `AGENT_TIMEOUT_S`.
+5. **Chat model** and **Fast model.** Prefilled with the provider's defaults (Anthropic: `claude-sonnet-5-5` and `claude-haiku-5-5`; Gemini: `gemini-2.5-flash` for both; Ollama: `qwen2.5:7b-instruct` for both, so pull it first; `openai_compatible` has no default, you type the name your server uses). The fast model is a cheaper one used for rewriting follow-up questions and quick checks. Press Enter to accept.
+6. **API key for the chat provider** (Anthropic and Gemini only; local providers need none). The input is hidden. Enter the key, press Enter to keep the current one, type `-` to clear it, or leave it empty to skip. You can skip and add it later, but the chat will say "AI provider not configured" until a key is set.
+7. **Embedding provider** (`gemini`, `voyage`, `openai`, then, for testing, `ollama`, `openai_compatible` or `local`). Default `gemini`. Embeddings turn text into numbers so the system can find passages by meaning. Anthropic has no embeddings service, so Claude users pick one of these separately. If you chose Gemini for chat, setup tells you the Gemini key is shared and asks for it only once.
+8. **Embedding model** and **Embedding dimension.** Defaults: Gemini `gemini-embedding-001` / 768, Voyage `voyage-3.5` / 1024, OpenAI `text-embedding-3-small` / 1536, Ollama `nomic-embed-text` / 768, `local` `BAAI/bge-small-en-v1.5` / 384. For `openai_compatible` you type the model and its dimension. Other good local models: `bge-m3` and `mxbai-embed-large` (both 1024). For `ollama` and `openai_compatible` setup then asks for the server address; for `local` it explains the 1-2 GB PyTorch download and offers to install it now.
 9. **API key for the embedding provider** (hidden, same rules as step 6), unless it is the shared Gemini key.
 10. **Tavily web search API key** (optional, hidden). Only needed if the assistant may search the internet when the material cannot answer. Only the search query is sent to Tavily. Without a key, the assistant answers from the material only and says that web search is not configured.
 11. Setup writes the `.env` file, brings the database up to date, creates the programme structure (Years, Blocks and Modules), and, if no administrator exists yet, asks you to **create the first administrator**:
@@ -99,13 +106,13 @@ Port for the web app [8000]:
 Current network setting: this computer only.
 Will other computers connect to this machine over the network without HTTPS? [y/N]:
 Generated a new SECRET_KEY.
-Chat AI provider (anthropic/gemini) [anthropic]: gemini
+Chat AI provider (anthropic/gemini/ollama/openai_compatible) [anthropic]: gemini
 Chat model [gemini-2.5-flash]:
 Fast model [gemini-2.5-flash]:
 Gemini API key (optional) [(not set)] (Enter keeps it, '-' clears it, empty skips):
 Gemini chat and Gemini embeddings share GOOGLE_API_KEY, so it is asked only once.
 Embeddings are independent of the chat model (Anthropic has no embeddings API).
-Embedding provider (gemini/voyage/openai) [gemini]:
+Embedding provider (gemini/voyage/openai/ollama/openai_compatible/local) [gemini]:
 Embedding model [gemini-embedding-001]:
 Embedding dimension [768]:
 Note: changing the embedding provider, model or dimension later (after material was
@@ -203,7 +210,7 @@ CoursePilot can be run in three ways. They differ in **where the application run
 | **Application runs on** | Your own computer or server | Your own server with a GPU | A rented cloud server (VPS) |
 | **AI models** | Anthropic Claude or Google Gemini (cloud APIs) | Open models on your own hardware | Anthropic Claude or Google Gemini (cloud APIs) |
 | **What leaves your network** | Questions, retrieved passages and document text for embedding go to the AI provider; web-search queries go to Tavily | Nothing, if web search is off | Everything is hosted outside; the same AI traffic as option 1 |
-| **Status** | **Available now** | **Planned** (not available yet) | **Available now**, as a service or as a Docker container |
+| **Status** | **Available now** | **Available for testing** (Anthropic/Gemini remain the recommended default) | **Available now**, as a service or as a Docker container |
 | **Best for** | Most universities; quick start | Strict data-protection rules, no cloud AI allowed | No local server; access from anywhere over HTTPS |
 
 > **The figures below are sizing guidance**, not guarantees. They assume one programme (27 modules) with up to a few thousand documents and up to about 100 students chatting at the same time. Start with the "recommended" column and watch the **Usage** and **Jobs** pages.
@@ -228,11 +235,32 @@ Notes:
 - Keep the `data/` folder on a **local SSD**, never on a network share.
 - Costs are mostly the AI provider's per-token charges, not hardware. See **Usage** for tokens per day.
 
-## Option 2: On-premises with local AI models (planned)
+## Option 2: On-premises with local AI models (for testing)
 
-> **Not available yet.** The current version cannot use local models: setup offers only **Anthropic** and **Gemini** for chat, and Gemini, Voyage or OpenAI for embeddings. Local models are planned as a **third AI provider option** next to Anthropic and Gemini (and a local embedding option). This needs a software update; CoursePilot is designed for it, because the chat model and the embeddings each sit behind one small interface. This section tells you what hardware to plan for.
+> **Available for testing.** Anthropic and Gemini remain the recommended choice: they give the best answers with the least effort. Use local models when no question or document may leave your network, or to try CoursePilot without API costs. Quality and speed depend on your model and hardware; test on your own material first.
 
 Everything, including the AI, runs on your own hardware, for example with **Ollama** serving an open chat model (such as Llama, Qwen, Mistral or Gemma) and a local embedding model. With web search turned off (`WEB_SEARCH_PROVIDER=none`), no question or document leaves your network.
+
+### How to set it up
+
+1. **Install Ollama** on the machine that has the GPU (ollama.com). It can be the same machine as CoursePilot or another one on your network.
+2. **Pull a chat model and an embedding model**, for example `ollama pull qwen2.5:7b-instruct` and `ollama pull nomic-embed-text` (see ollama.com/library for current models; bigger models need more GPU memory, see the table below).
+3. **Run setup** (`setup.bat` / `./setup.sh`) and choose `ollama` as the chat provider and as the embedding provider, or edit `.env` by hand: `LLM_PROVIDER=ollama`, `LLM_MODEL` and `LLM_FAST_MODEL` (the same model is fine), `EMBEDDING_PROVIDER=ollama`, `EMBEDDING_MODEL=nomic-embed-text`, `EMBEDDING_DIM=768`, and `OLLAMA_BASE_URL` if Ollama is on another machine.
+4. **Re-index if the embedding model changed.** If material was already processed with another embedding model, stop CoursePilot and run `python -m uv run python -m app.cli reindex-all` from the `backend` folder; until then search reports an index mismatch.
+5. **Allow more time.** Local models are slower, especially on a CPU. Raise `AGENT_TIMEOUT_S` in `.env` (for example to `300`).
+
+Other servers: anything that speaks the OpenAI API works with `LLM_PROVIDER=openai_compatible` (vLLM, LM Studio, the llama.cpp server, LocalAI): set `LOCAL_LLM_BASE_URL` (including `/v1`), optionally `LOCAL_LLM_API_KEY`, and the model name. For embeddings use `EMBEDDING_PROVIDER=openai_compatible` with the same server (or `LOCAL_EMBEDDING_BASE_URL` for another one).
+
+### Two ways to compute embeddings locally
+
+- **With a local server** (`ollama` or `openai_compatible`): a separate program does the work. Nothing heavy is installed into CoursePilot, the model can use the GPU, and several programs can share it. This is the simplest and the recommended local way.
+- **Inside CoursePilot** (`local`): CoursePilot itself runs the model with PyTorch (sentence-transformers). No second program to run, but it needs a download of about **1-2 GB** (the CPU-only PyTorch build; no NVIDIA packages), the model is downloaded on first use (internet needed once), and both the web app and the worker load the model, so plan for the extra memory twice. Small models such as `BAAI/bge-small-en-v1.5` (384 dimensions) run acceptably on a CPU; larger ones such as `BAAI/bge-m3` (1024) want a GPU. Install once with `cd backend`, then `python -m uv sync --extra local-embeddings` (setup offers to do it); set `LOCAL_EMBEDDING_DEVICE` to `cpu`, `cuda` or `mps` or leave it on `auto` (the bundled build runs on the CPU; for GPU speed use Ollama or vLLM instead).
+
+Some embedding models need a short text in front of documents and questions (for example `nomic-embed-text` uses `search_document:` and `search_query:`). CoursePilot adds it automatically for the common models; `EMBEDDING_DOCUMENT_PREFIX` and `EMBEDDING_QUERY_PREFIX` in `.env` override it, and changing them needs `reindex-all` like changing the model.
+
+### With Docker
+
+The Compose file has an optional Ollama container, off by default: `docker compose --profile local-ai up -d`. Then pull the models inside it (`docker compose exec ollama ollama pull qwen2.5:7b-instruct`, `docker compose exec ollama ollama pull nomic-embed-text`) and set `OLLAMA_BASE_URL=http://ollama:11434` in `.env`. GPU use needs the NVIDIA Container Toolkit and the commented block in `compose.yaml`. Details: `docs/deploy.md`, "Local AI".
 
 The GPU decides the answer quality and speed:
 
@@ -251,6 +279,7 @@ Notes:
 - Local embedding models are small and run well on the CPU or the same GPU. Changing the embedding model means re-processing all material once (`reindex-all`).
 - Without a GPU, a small model runs on the CPU only at a few words per second: fine for testing, too slow for a class.
 - Expect answers that are good but not as strong as the best cloud models, especially for long or subtle questions. Try it on your own material before committing.
+- `python -m app.cli check --production` tells you if a local server address or model is missing, and warns when a local server on another machine is reached without HTTPS.
 
 ## Option 3: Everything hosted in the cloud
 

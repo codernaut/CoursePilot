@@ -12,10 +12,10 @@ Browser ──HTTP──▶ FastAPI app (uvicorn)  ── pages (Jinja2 + HTMX),
                       │                 ├── chunk_vectors  (sqlite-vec vec0)
                       │                 └── chunks_fts     (FTS5)
                       ├── Storage ───▶ LocalStorage (data/files)  |  S3Storage (R2)
-                      ├── agent ─────▶ LLM (Anthropic | Gemini)  +  checkpoints.db (SQLite)
+                      ├── agent ─────▶ LLM (Anthropic | Gemini | Ollama | OpenAI-compatible)  +  checkpoints.db (SQLite)
                       │               └─▶ Tavily (web fallback)
                       └── enqueue ───▶ jobs table
-Worker (python -m app.worker) ──claims jobs──▶ parse → chunk → embed (Gemini | Voyage | OpenAI) → write chunks
+Worker (python -m app.worker) ──claims jobs──▶ parse → chunk → embed (Gemini | Voyage | OpenAI | Ollama | OpenAI-compatible | local) → write chunks
 ```
 
 Programme structure: Year › Block › Module (default 3 × 3 × 3). Documents belong to a module; chunks also carry block and year ids.

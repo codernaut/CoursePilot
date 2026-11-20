@@ -90,5 +90,10 @@ jobs:
         if: failure()
         run: docker compose logs --no-color || true
 
+      - name: Validate the compose file with the optional local-ai profile (no pull)
+        run: |
+          touch .env
+          docker compose --profile local-ai config -q
+
       - name: Validate the Kubernetes manifests
         run: kubectl kustomize deploy/kubernetes > /dev/null

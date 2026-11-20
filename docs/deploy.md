@@ -13,7 +13,7 @@ CoursePilot is one Python application (web app + JSON API) plus one background w
 
 The common topics (R2 bucket, backups, upgrades, monitoring, rotating keys) are at the end.
 
-**Deployment profiles and sizing.** The user manual chapter "Deployment options and system requirements" describes the three profiles with hardware sizing: (1) on-premises with cloud AI (guides A-C), (2) on-premises with local AI models (planned, M11: not in the code yet, only Anthropic and Gemini are supported), (3) everything in the cloud, as a service (guides A and D) or as a Docker container (guide E for Docker Compose, guide F for Kubernetes; Docker stays optional). Whatever the profile, run a single instance with SQLite on the server's own disk or block volume, never on a network file system.
+**Deployment profiles and sizing.** The user manual chapter "Deployment options and system requirements" describes the three profiles with hardware sizing: (1) on-premises with cloud AI (guides A-C), (2) on-premises with local AI models (available for testing, M11: Ollama or an OpenAI-compatible server, see "Local AI" below; Anthropic and Gemini remain the recommended default), (3) everything in the cloud, as a service (guides A and D) or as a Docker container (guide E for Docker Compose, guide F for Kubernetes; Docker stays optional). Whatever the profile, run a single instance with SQLite on the server's own disk or block volume, never on a network file system.
 
 ## What runs where
 
@@ -143,11 +143,33 @@ An optional, ready-made container image runs the web app and the worker. Docker 
 5. **Backups**: `docker compose run --rm web python -m app.cli backup --out /data/backups --keep 7`, then copy the folder off the host (`docker compose cp web:/data/backups ./backups` works while the stack runs). The backup does not include `.env`. Restore: `docker compose stop`, then `docker compose run --rm web python -m app.cli restore /data/backups/<folder>`, then `docker compose up -d`.
 6. **Upgrade**: back up, update the source, `docker compose up -d --build`. Migrations run on start. Logs: `docker compose logs -f web worker`.
 
-Rules: **one** instance (never `--scale`), `/data` on the host's local disk (the default named volume is; never mount NFS/SMB there), no Docker socket or privileged mode needed. The image runs as a non-root user (uid 10001). OCR (tesseract) is not included because `OCR_ENABLED` is off by default; the top of the `Dockerfile` says how to add it. The image is built locally or by your CI; the project does not publish images yet.
+Rules: **one** instance (never `--scale`), `/data` on the host's local disk (the default named volume is; never mount NFS/SMB there), no Docker socket or privileged mode needed. The image runs as a non-root user (uid 10001). OCR (tesseract) is not included because `OCR_ENABLED` is off by default; the top of the `Dockerfile` says how to add it. The optional `local-ai` profile adds an Ollama container (see "Local AI" below). The image is built locally or by your CI; the project does not publish images yet.
 
 ## F. Kubernetes
 
 Plain manifests for one instance are in `deploy/kubernetes/` (namespace, 20 Gi `ReadWriteOnce` volume, one Deployment, Service, nginx Ingress, kustomization). One pod holds two containers, `web` (`app.cli serve`) and `worker` (`app.worker`), sharing the volume; `replicas: 1` with `strategy: Recreate` is deliberate (SQLite has one writer, login throttling is in-process, the volume is `ReadWriteOnce`). Settings come from a secret: `kubectl create secret generic coursepilot-env -n coursepilot --from-env-file=.env` (unquoted values, no inline comments). The full steps (build and push the image, secret, `kubectl apply -k deploy/kubernetes`, first admin with `kubectl exec`, backups, upgrades) are in `deploy/kubernetes/README.md`. The volume must be block storage, not NFS/SMB.
+
+## Local AI (optional, for testing)
+
+Profile 2 runs the language model and the embeddings on hardware you control. Anthropic and Gemini remain the recommended default; use local AI when material must not leave the network (also set `WEB_SEARCH_PROVIDER=none`) or to test without API costs. Quality and speed depend on the model and hardware. The manual's chapter "Deployment options and system requirements" has the sizing.
+
+Chat (`LLM_PROVIDER`):
+- `ollama`: install Ollama, `ollama pull qwen2.5:7b-instruct` (check ollama.com/library for current models), set `LLM_PROVIDER=ollama`, `LLM_MODEL` and `LLM_FAST_MODEL` (the same model is fine) and, if Ollama is not on the same machine, `OLLAMA_BASE_URL`.
+- `openai_compatible`: any server with the OpenAI chat API (vLLM, LM Studio, llama.cpp server, LocalAI, Ollama's `/v1`): `LOCAL_LLM_BASE_URL=http://host:8001/v1`, optional `LOCAL_LLM_API_KEY`, and the model names the server serves.
+- Local models can be slow, especially without a GPU: raise `AGENT_TIMEOUT_S` (for example 300).
+
+Embeddings (`EMBEDDING_PROVIDER`), pick one:
+- `ollama`: `ollama pull nomic-embed-text`, `EMBEDDING_MODEL=nomic-embed-text`, `EMBEDDING_DIM=768` (alternatives: `bge-m3` and `mxbai-embed-large`, both 1024).
+- `openai_compatible`: a server with `/v1/embeddings` (`LOCAL_EMBEDDING_BASE_URL`, or `LOCAL_LLM_BASE_URL` when it is the same server); set model and dimension yourself.
+- `local`: computed inside CoursePilot with sentence-transformers and PyTorch. Install the optional extra once: `cd backend && python -m uv sync --extra local-embeddings` (about 1-2 GB; the CPU-only PyTorch build, no NVIDIA packages; for GPU speed use Ollama or vLLM). `setup` offers it. Default model `BAAI/bge-small-en-v1.5` (384), cached in `DATA_DIR/models` (downloaded on first use, so the server needs internet once). `LOCAL_EMBEDDING_DEVICE` is `auto`, `cpu`, `cuda` or `mps` (the bundled CPU build cannot use `cuda`; `auto` picks cpu unless cuda or mps is really available). The web app and the worker both load the model, so allow the RAM twice.
+- Models that need a task prefix get it automatically (nomic-embed-text, e5, bge-*-en, mxbai-embed-large); `EMBEDDING_DOCUMENT_PREFIX` / `EMBEDDING_QUERY_PREFIX` override.
+- After any embedding change (provider, model, dimension or prefix), run `python -m app.cli reindex-all` with the worker stopped (see "Changing the embedding provider, model or dimension").
+
+`python -m app.cli check --production` fails when a chosen local provider has no address or model, and warns when a local server is reached over plain http on another machine.
+
+**With Docker Compose**: `docker compose --profile local-ai up -d` also starts an `ollama` container (internal network only, models in the `ollama-models` volume; the GPU block in `compose.yaml` is commented out and needs the NVIDIA Container Toolkit). Then `docker compose exec ollama ollama pull qwen2.5:7b-instruct` and `docker compose exec ollama ollama pull nomic-embed-text`, and in `.env`: `LLM_PROVIDER=ollama`, `EMBEDDING_PROVIDER=ollama`, `OLLAMA_BASE_URL=http://ollama:11434`, the model names, then `docker compose up -d` again and `reindex-all` if the embedding model changed. `COMPOSE_PROFILES=local-ai` in `.env` makes `docker-start.*` start it too. Inside the containers `localhost` is the container itself: use `http://host.docker.internal:11434` (or the host's address) for an Ollama on the host. In-process embeddings need `docker compose build --build-arg EXTRAS=local-embeddings` (or `EXTRAS=local-embeddings` in the environment).
+
+**Kubernetes**: no Ollama manifest; run Ollama or vLLM as its own service and put its URL in `OLLAMA_BASE_URL` / `LOCAL_LLM_BASE_URL`.
 
 ## Backups and the restore drill
 
@@ -182,7 +204,7 @@ Edit `SECRET_KEY` in `.env` (>= 32 random characters, e.g. `python -c "import se
 
 ## Changing the embedding provider, model or dimension
 
-Edit `EMBEDDING_PROVIDER`/`EMBEDDING_MODEL`/`EMBEDDING_DIM` and the key, **stop the worker**, run `python -m app.cli reindex-all`, then start the worker. Documents are not searchable until they are re-processed; until then search answers `index_mismatch`. Costs embedding API calls for every document.
+Edit `EMBEDDING_PROVIDER`/`EMBEDDING_MODEL`/`EMBEDDING_DIM` (or an embedding prefix) and the key or server address, **stop the worker**, run `python -m app.cli reindex-all`, then start the worker. Documents are not searchable until they are re-processed; until then search answers `index_mismatch`. Costs embedding API calls for every document.
 
 ## Changing keys
 

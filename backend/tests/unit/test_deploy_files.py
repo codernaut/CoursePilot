@@ -65,7 +65,7 @@ def test_dockerfile_is_a_python_312_multi_stage_uv_build() -> None:
     assert any(line.startswith("ARG PYTHON_IMAGE=python:3.12-slim-bookworm") for line in lines)
     assert sum(1 for line in lines if line.startswith("FROM ")) >= 2
     assert any("uv sync --frozen --no-dev --no-install-project" in line for line in lines)
-    assert any(line.endswith("uv sync --frozen --no-dev") for line in lines)
+    assert any(line.endswith("uv sync --frozen --no-dev $flags") for line in lines)
     assert re.search(
         r"COPY --from=ghcr\.io/astral-sh/uv:(latest|\d+\.\d+(\.\d+)?) ", dockerfile_text()
     )
@@ -158,6 +158,30 @@ def test_compose_overrides_paths_and_checks_a_real_health_route() -> None:
             assert key in SETTING_NAMES
     test = " ".join(compose["services"]["web"]["healthcheck"]["test"])
     assert any(path in test for path in HEALTH_PATHS)
+
+
+def test_dockerfile_extras_are_an_empty_build_arg_for_both_syncs() -> None:
+    """EXTRAS (e.g. local-embeddings) must reach BOTH syncs: the second one is exact and would
+    otherwise remove what the first installed. The default image installs no extra."""
+    lines = dockerfile_instructions()
+    assert 'ARG EXTRAS=""' in lines
+    syncs = [line for line in lines if "uv sync" in line]
+    assert len(syncs) == 2
+    assert all("--extra $extra" in line and "$EXTRAS" in line for line in syncs)
+
+
+def test_compose_ollama_is_an_optional_profile_with_its_own_volume() -> None:
+    compose = load(COMPOSE)
+    ollama = compose["services"]["ollama"]
+    assert ollama["profiles"] == ["local-ai"]  # off unless asked for
+    assert ollama["image"] == "ollama/ollama:0.40.16"
+    assert "ollama-models:/root/.ollama" in ollama["volumes"]
+    assert "ollama-models" in compose["volumes"]
+    assert "ports" not in ollama  # internal network only
+    for name in ("web", "worker"):  # nothing in the default stack waits for it
+        assert "ollama" not in compose["services"][name].get("depends_on", {})
+        assert "profiles" not in compose["services"][name]
+    assert compose["services"]["web"]["build"]["args"] == {"EXTRAS": "${EXTRAS:-}"}
 
 
 # --- Kubernetes ------------------------------------------------------------------------------

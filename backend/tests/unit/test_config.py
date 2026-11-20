@@ -72,7 +72,7 @@ def test_defaults_match_design() -> None:
 
 
 def test_invalid_provider_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("LLM_PROVIDER", "bogus")
     with pytest.raises(ValueError, match="llm_provider"):
         Settings(_env_file=None)
 

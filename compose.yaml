@@ -8,6 +8,14 @@
 #   docker compose run --rm web python -m app.cli backup --out /data/backups --keep 7
 #   docker compose logs -f web worker
 #
+# Optional local AI (profile `local-ai`, off by default; see docs/deploy.md, "Local AI"):
+#   docker compose --profile local-ai up -d            # also starts an Ollama server
+#   docker compose exec ollama ollama pull qwen2.5:7b-instruct    # chat model
+#   docker compose exec ollama ollama pull nomic-embed-text       # embedding model
+#   and in .env: LLM_PROVIDER=ollama, EMBEDDING_PROVIDER=ollama, OLLAMA_BASE_URL=http://ollama:11434
+#   In-process embeddings (EMBEDDING_PROVIDER=local) need the image built with PyTorch:
+#   docker compose build --build-arg EXTRAS=local-embeddings
+#
 # Rules (CLAUDE.md section 1, "Deployment profiles"):
 #   * ONE instance only. Never `docker compose up --scale web=2` or `--scale worker=2`: SQLite has
 #     one writer and login throttling is in-process.
@@ -41,6 +49,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        EXTRAS: ${EXTRAS:-}
     command: ["python", "-m", "app.cli", "serve"]
     ports:
       - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8000}:8000"
@@ -68,6 +78,31 @@ services:
         condition: service_healthy
     stop_grace_period: 30s
 
+  # Optional local model server. Only started with `--profile local-ai`. It is reachable from the
+  # other services as http://ollama:11434 and publishes no port. Models live in the ollama-models
+  # volume (several GB each).
+  # GPU: needs the NVIDIA Container Toolkit on the host; uncomment the deploy block. Without it
+  # Ollama runs on the CPU (works, but slowly).
+  ollama:
+    profiles: ["local-ai"]
+    image: ollama/ollama:0.40.16
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
   # Optional HTTPS in front (automatic certificates). Uncomment, set your host name in
   # deploy/Caddyfile (reverse_proxy web:8000), publish only caddy (WEB_BIND stays 127.0.0.1).
   # caddy:
@@ -81,4 +116,5 @@ services:
 
 volumes:
   coursepilot-data:
+  ollama-models:
   # caddy-data:

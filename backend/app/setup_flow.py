@@ -22,16 +22,34 @@ from app.services.password_policy import validate_password
 
 MIN_PYTHON = (3, 12)
 
+# Menu order is the order of these dicts: the hosted providers first (recommended), the local-AI
+# options last. An empty default means "no safe default: ask".
 LLM_DEFAULTS: dict[str, tuple[str, str]] = {
     "anthropic": ("claude-sonnet-5-5", "claude-haiku-5-5"),
     "gemini": ("gemini-2.5-flash", "gemini-2.5-flash"),
+    "ollama": ("qwen2.5:7b-instruct", "qwen2.5:7b-instruct"),
+    "openai_compatible": ("", ""),
+}
+LLM_LABELS = {
+    "ollama": "ollama (local server, for testing)",
+    "openai_compatible": "openai_compatible (local server, for testing)",
 }
 LLM_KEY_VARS = {"anthropic": "ANTHROPIC_API_KEY", "gemini": "GOOGLE_API_KEY"}
 EMBEDDING_DEFAULTS: dict[str, tuple[str, int]] = {
     "gemini": ("gemini-embedding-001", 768),
     "voyage": ("voyage-3.5", 1024),
     "openai": ("text-embedding-3-small", 1536),
+    "ollama": ("nomic-embed-text", 768),
+    "openai_compatible": ("", 0),
+    "local": ("BAAI/bge-small-en-v1.5", 384),
 }
+EMBEDDING_LABELS = {
+    "ollama": "ollama (local Ollama server, for testing)",
+    "openai_compatible": "openai_compatible (local server, for testing)",
+    "local": "local (inside CoursePilot with PyTorch, for testing; large download)",
+}
+LOCAL_EMBEDDING_PROVIDERS = ("ollama", "openai_compatible", "local")
+LOCAL_EXTRA = "local-embeddings"
 EMBEDDING_KEY_VARS = {
     "gemini": "GOOGLE_API_KEY",
     "voyage": "VOYAGE_API_KEY",
@@ -264,6 +282,8 @@ class SetupDeps:
     admin_exists: Callable[[Settings], bool]
     create_admin: Callable[[Settings, str, str, str], None]
     check_sqlite: Callable[[], list[str]]
+    # Installs the optional PyTorch extra; True on success. None = not offered (tests).
+    install_local_embeddings: Callable[[], bool] | None = None
 
 
 def _ask_default(p: Prompter, prompt: str, default: str) -> str:
@@ -271,7 +291,16 @@ def _ask_default(p: Prompter, prompt: str, default: str) -> str:
     return answer or default
 
 
-def _ask_choice(p: Prompter, prompt: str, choices: list[str], default: str) -> str:
+def _ask_choice(
+    p: Prompter,
+    prompt: str,
+    choices: list[str],
+    default: str,
+    labels: dict[str, str] | None = None,
+) -> str:
+    for choice in choices:
+        if labels and choice in labels:
+            p.say(f"  {labels[choice]}")
     while True:
         answer = _ask_default(p, f"{prompt} ({'/'.join(choices)})", default).lower()
         if answer in choices:
@@ -354,6 +383,106 @@ def _ask_key(p: Prompter, env: EnvFile, var: str, label: str) -> None:
         env.set(var, answer)
 
 
+def _ask_model(p: Prompter, env: EnvFile, prompt: str, var: str, keep: bool, default: str) -> str:
+    return _ask_default_or_required(p, prompt, (env.get(var) if keep else None) or default)
+
+
+def _ask_default_or_required(p: Prompter, prompt: str, default: str) -> str:
+    """Like ``_ask_default``, but an empty default means the answer is required."""
+    if default:
+        return _ask_default(p, prompt, default)
+    for _ in range(5):
+        answer = p.ask(f"{prompt}:").strip()
+        if answer:
+            return answer
+        p.say("This value is required.")
+    return ""
+
+
+def _ask_dim(p: Prompter, default: str) -> str:
+    for _ in range(5):
+        answer = _ask_default_or_required(p, "Embedding dimension", default)
+        if answer.isascii() and answer.isdigit() and int(answer) >= 1:
+            return answer
+        p.say("Enter the number of values per embedding (for example 768).")
+    return default or "768"
+
+
+def _ask_url(p: Prompter, env: EnvFile, var: str, prompt: str, default: str) -> None:
+    for _ in range(5):
+        value = _ask_default_or_required(p, prompt, env.get(var) or default).rstrip("/")
+        if not value or value.startswith(("http://", "https://")):
+            env.set(var, value)
+            return
+        p.say("The address must start with http:// or https://.")
+    env.set(var, default)
+
+
+def _ask_local_llm(
+    p: Prompter, env: EnvFile, provider: str, keep: bool, default_model: str, default_fast: str
+) -> None:
+    p.say(
+        "Local chat models run on your own hardware. They are for testing and local use; "
+        "Anthropic and Gemini remain the recommended choice. Answers can be slow without a GPU: "
+        "consider raising AGENT_TIMEOUT_S in .env (for example 300)."
+    )
+    if provider == "ollama":
+        _ask_url(p, env, "OLLAMA_BASE_URL", "Ollama address", "http://localhost:11434")
+        p.say(
+            "Pull the models first, for example 'ollama pull qwen2.5:7b-instruct' "
+            "(see ollama.com/library for current models)."
+        )
+    else:
+        _ask_url(
+            p,
+            env,
+            "LOCAL_LLM_BASE_URL",
+            "Server address incl. /v1 (e.g. http://localhost:8001/v1)",
+            "",
+        )
+        _ask_key(p, env, "LOCAL_LLM_API_KEY", "Server API key (optional, many servers ignore it)")
+    chat_model = _ask_model(p, env, "Chat model", "LLM_MODEL", keep, default_model)
+    env.set("LLM_MODEL", chat_model)
+    env.set(
+        "LLM_FAST_MODEL",
+        _ask_model(p, env, "Fast model", "LLM_FAST_MODEL", keep, default_fast or chat_model),
+    )
+
+
+def _ask_local_embedding(p: Prompter, deps: "SetupDeps", env: EnvFile, provider: str) -> None:
+    if provider == "ollama":
+        _ask_url(p, env, "OLLAMA_BASE_URL", "Ollama address", "http://localhost:11434")
+        p.say(
+            "Pull the model first, e.g. 'ollama pull nomic-embed-text' (768). Other choices: "
+            "bge-m3 (1024), mxbai-embed-large (1024)."
+        )
+        return
+    if provider == "openai_compatible":
+        _ask_url(
+            p,
+            env,
+            "LOCAL_EMBEDDING_BASE_URL",
+            "Embedding server address incl. /v1 (same as the chat server if empty)",
+            env.get("LOCAL_LLM_BASE_URL") or "",
+        )
+        return
+    p.say(
+        "In-process embeddings need PyTorch and sentence-transformers: a download of about "
+        "1-2 GB (the CPU-only PyTorch build). The embedding "
+        "model itself is downloaded on first use. Other choice: BAAI/bge-m3 (1024)."
+    )
+    command = f"cd backend && python -m uv sync --extra {LOCAL_EXTRA}"
+    if deps.install_local_embeddings is None:
+        p.say(f"Install it before starting: {command}")
+    elif _ask_yes_no(p, "Install it now?", False):
+        if deps.install_local_embeddings():
+            p.say("Installed.")
+        else:
+            p.say(f"The install failed. Run it yourself: {command}")
+    else:
+        p.say(f"Install it before starting: {command}")
+
+
 def run_setup(
     p: Prompter,
     deps: SetupDeps,
@@ -421,51 +550,58 @@ def run_setup(
 
     # Chat model
     old_provider = env.get("LLM_PROVIDER") or "anthropic"
-    provider = _ask_choice(p, "Chat AI provider", list(LLM_DEFAULTS), old_provider)
+    provider = _ask_choice(
+        p, "Chat AI provider", list(LLM_DEFAULTS), old_provider, labels=LLM_LABELS
+    )
     default_model, default_fast = LLM_DEFAULTS[provider]
     keep = provider == old_provider
     env.set("LLM_PROVIDER", provider)
-    env.set(
-        "LLM_MODEL",
-        _ask_default(p, "Chat model", (env.get("LLM_MODEL") if keep else None) or default_model),
-    )
-    env.set(
-        "LLM_FAST_MODEL",
-        _ask_default(
-            p, "Fast model", (env.get("LLM_FAST_MODEL") if keep else None) or default_fast
-        ),
-    )
     asked_keys: set[str] = set()
-    llm_key = LLM_KEY_VARS[provider]
-    _ask_key(p, env, llm_key, f"{provider.capitalize()} API key (optional)")
-    asked_keys.add(llm_key)
-    if provider == "gemini":
-        p.say("Gemini chat and Gemini embeddings share GOOGLE_API_KEY, so it is asked only once.")
+    if provider in LLM_KEY_VARS:
+        env.set("LLM_MODEL", _ask_model(p, env, "Chat model", "LLM_MODEL", keep, default_model))
+        env.set(
+            "LLM_FAST_MODEL",
+            _ask_model(p, env, "Fast model", "LLM_FAST_MODEL", keep, default_fast),
+        )
+        llm_key = LLM_KEY_VARS[provider]
+        _ask_key(p, env, llm_key, f"{provider.capitalize()} API key (optional)")
+        asked_keys.add(llm_key)
+        if provider == "gemini":
+            p.say(
+                "Gemini chat and Gemini embeddings share GOOGLE_API_KEY, so it is asked only once."
+            )
+    else:
+        _ask_local_llm(p, env, provider, keep, default_model, default_fast)
 
     # Embeddings
     p.say("Embeddings are independent of the chat model (Anthropic has no embeddings API).")
     old_embedding = env.get("EMBEDDING_PROVIDER") or "gemini"
     old_embedding_cfg = (old_embedding, env.get("EMBEDDING_MODEL"), env.get("EMBEDDING_DIM"))
-    embedding = _ask_choice(p, "Embedding provider", list(EMBEDDING_DEFAULTS), old_embedding)
+    embedding = _ask_choice(
+        p, "Embedding provider", list(EMBEDDING_DEFAULTS), old_embedding, labels=EMBEDDING_LABELS
+    )
     emb_model, emb_dim = EMBEDDING_DEFAULTS[embedding]
     same = embedding == old_embedding
     env.set("EMBEDDING_PROVIDER", embedding)
     env.set(
         "EMBEDDING_MODEL",
-        _ask_default(
+        _ask_default_or_required(
             p, "Embedding model", (env.get("EMBEDDING_MODEL") if same else None) or emb_model
         ),
     )
     env.set(
         "EMBEDDING_DIM",
-        _ask_default(
-            p, "Embedding dimension", (env.get("EMBEDDING_DIM") if same else None) or str(emb_dim)
+        _ask_dim(
+            p, (env.get("EMBEDDING_DIM") if same else None) or (str(emb_dim) if emb_dim else "")
         ),
     )
-    emb_key = EMBEDDING_KEY_VARS[embedding]
-    if emb_key not in asked_keys:
-        _ask_key(p, env, emb_key, f"{embedding.capitalize()} API key (optional)")
-        asked_keys.add(emb_key)
+    if embedding in LOCAL_EMBEDDING_PROVIDERS:
+        _ask_local_embedding(p, deps, env, embedding)
+    else:
+        emb_key = EMBEDDING_KEY_VARS[embedding]
+        if emb_key not in asked_keys:
+            _ask_key(p, env, emb_key, f"{embedding.capitalize()} API key (optional)")
+            asked_keys.add(emb_key)
     p.say(
         "Note: changing the embedding provider, model or dimension later (after material was "
         "processed) requires 'python -m app.cli reindex-all'."

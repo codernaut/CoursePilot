@@ -60,3 +60,15 @@ All of these are AGPL-compatible. `uv.lock` holds the exact versions.
 | `moto` (dev only) | Apache-2.0 | S3 emulator for the storage tests; not shipped at runtime. |
 
 All of these are AGPL-compatible. `uv.lock` holds the exact versions.
+
+### Direct dependencies added in M11 (local AI)
+
+| Package | Licence | Notes |
+|---|---|---|
+| `langchain-ollama` | MIT | `ChatOllama` for `LLM_PROVIDER=ollama`. Uses the `ollama` client library (MIT). |
+| `langchain-openai` | MIT | `ChatOpenAI` for `LLM_PROVIDER=openai_compatible`. Uses the `openai` SDK (Apache-2.0) and `tiktoken` (MIT). |
+| `sentence-transformers` (optional extra `local-embeddings`) | Apache-2.0 | In-process embeddings (`EMBEDDING_PROVIDER=local`). Pulls in the CPU-only PyTorch build (BSD-3-Clause), `transformers` (Apache-2.0), `scikit-learn` (BSD-3-Clause) and others. Not installed by default. |
+
+All of these are AGPL-compatible. `uv.lock` holds the exact versions.
+
+Licence note: PyTorch is taken from the CPU-only index (`[[tool.uv.index]] pytorch-cpu` in `backend/pyproject.toml`), so `uv.lock` contains no `nvidia-*` CUDA packages and no `triton` (NVIDIA proprietary licence); a test enforces this. For GPU acceleration run Ollama or vLLM, which are separate programs and not dependencies of this project.

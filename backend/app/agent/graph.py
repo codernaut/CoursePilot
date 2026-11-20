@@ -130,14 +130,14 @@ def _add_usage(current: dict[str, Any], message: BaseMessage | None) -> dict[str
     return merged
 
 
-_LIMIT_REASONS = {"max_tokens", "length", "max_output_tokens"}
+_LIMIT_REASONS = {"max_tokens", "length", "max_output_tokens"}  # Ollama: done_reason "length"
 
 
 def _hit_length_limit(message: BaseMessage) -> bool:
     """Did the provider stop this reply because of the output-length limit (Anthropic
     ``stop_reason=max_tokens``, Gemini ``finish_reason=MAX_TOKENS``, OpenAI-style ``length``)?"""
     meta = message.response_metadata or {}
-    reason = meta.get("stop_reason") or meta.get("finish_reason")
+    reason = meta.get("stop_reason") or meta.get("finish_reason") or meta.get("done_reason")
     return isinstance(reason, str) and reason.lower() in _LIMIT_REASONS
 
 
